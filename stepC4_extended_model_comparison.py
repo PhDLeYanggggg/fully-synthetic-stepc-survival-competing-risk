@@ -156,6 +156,7 @@ class Config:
     random_seed: int = RANDOM_SEED
     horizon_years: float = HORIZON_YEARS
     rerun_failed: bool = False
+    max_new_model_fits: Optional[int] = None
 
 
 def parse_args() -> Config:
@@ -171,6 +172,12 @@ def parse_args() -> Config:
     parser.add_argument("--seed", type=int, default=RANDOM_SEED)
     parser.add_argument("--horizon", type=float, default=HORIZON_YEARS)
     parser.add_argument("--rerun-failed", action="store_true")
+    parser.add_argument(
+        "--max-new-model-fits",
+        type=int,
+        default=None,
+        help="Optional checkpointed chunk size. Runs at most this many new scenario-replicate-model rows, then writes partial summaries and exits.",
+    )
     args = parser.parse_args()
     if args.debug and args.full:
         parser.error("Use either --debug or --full, not both.")
@@ -199,6 +206,7 @@ def parse_args() -> Config:
         random_seed=args.seed,
         horizon_years=args.horizon,
         rerun_failed=args.rerun_failed,
+        max_new_model_fits=args.max_new_model_fits,
     )
 
 
@@ -217,6 +225,7 @@ def run_metadata(config: Config) -> Dict[str, Any]:
         "test_size": float(config.test_size),
         "random_seed": int(config.random_seed),
         "max_reps_per_scenario": "" if config.max_reps_per_scenario is None else int(config.max_reps_per_scenario),
+        "max_new_model_fits": "" if config.max_new_model_fits is None else int(config.max_new_model_fits),
     }
 
 
@@ -507,7 +516,16 @@ def append_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
     if not rows:
         return
     df = pd.DataFrame(rows)
-    write_header = not path.exists()
+    write_header = not path.exists() or path.stat().st_size == 0
+    if not write_header:
+        existing_cols = pd.read_csv(path, nrows=0).columns.tolist()
+        new_cols = [col for col in df.columns if col not in existing_cols]
+        if new_cols:
+            existing = pd.read_csv(path)
+            all_cols = existing_cols + new_cols
+            existing.reindex(columns=all_cols).to_csv(path, index=False)
+            existing_cols = all_cols
+        df = df.reindex(columns=existing_cols)
     df.to_csv(path, mode="a", header=write_header, index=False)
 
 
@@ -1786,6 +1804,7 @@ def process_all(config: Config, paths: Dict[str, Path], dep: pd.DataFrame, dgm_p
     cal_path = paths["tables"] / "calibration_deciles_replicate_level_C4.csv"
     existing = get_existing_successes(perf_path, config)
     metadata = run_metadata(config)
+    new_rows_written = 0
 
     pred_sample_written = len(pd.read_csv(pred_sample_path)) if pred_sample_path.exists() else 0
     for file in scenario_files(config):
@@ -1831,12 +1850,19 @@ def process_all(config: Config, paths: Dict[str, Path], dep: pd.DataFrame, dgm_p
                     for key, value in metadata.items():
                         deciles[key] = value
                     append_csv(cal_path, deciles.to_dict("records"))
+                new_rows_written += 1
                 status = "ok"
                 if row.get("skipped"):
                     status = "skipped"
                 if row.get("failed"):
                     status = "failed"
                 print(f"    {model}: {status} runtime={row.get('runtime_sec', np.nan):.2f}s", flush=True)
+                if config.max_new_model_fits is not None and new_rows_written >= config.max_new_model_fits:
+                    print(
+                        f"Reached --max-new-model-fits={config.max_new_model_fits}; wrote partial checkpoint and will stop this chunk.",
+                        flush=True,
+                    )
+                    return
 
         del scenario_df
 
@@ -1930,6 +1956,7 @@ def main() -> None:
     print(f"DATA_DIR={config.data_dir}", flush=True)
     print(f"OUT_DIR={config.out_dir}", flush=True)
     print(f"MAX_REPS_PER_SCENARIO={config.max_reps_per_scenario}", flush=True)
+    print(f"MAX_NEW_MODEL_FITS={config.max_new_model_fits}", flush=True)
 
     validate_export_safety(config)
     dep = dependency_audit(paths)
