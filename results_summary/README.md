@@ -21,4 +21,18 @@ It does not contain scenario-level synthetic datasets, per-person prediction row
 - `C3_summary/full_run_sanity_checks_C3.csv`
 - `C3_summary/finegray_optional_status.csv`
 
-The larger replicate-level output tables remain local and are intentionally not tracked.
+## Included C4 debug tables
+
+`C4_debug_summary/` contains small aggregate and replicate-model debug outputs from Step C4. These are model-level or replicate-level summaries only. They do not include scenario datasets, full per-person predictions, or figures.
+
+Key C4 files include:
+
+- `C4_debug_summary/README_stepC4_extended_model_comparison.md`
+- `C4_debug_summary/replicate_extended_model_performance.csv`
+- `C4_debug_summary/scenario_extended_model_summary_mean_sd_ci.csv`
+- `C4_debug_summary/best_absolute_risk_model_by_scenario_C4.csv`
+- `C4_debug_summary/best_ranking_model_by_scenario_C4.csv`
+- `C4_debug_summary/oracle_sanity_audit_C4.csv`
+- `C4_debug_summary/full_run_sanity_checks_C4.csv`
+
+The larger full-run outputs and all figure files remain local unless explicitly reviewed and approved.

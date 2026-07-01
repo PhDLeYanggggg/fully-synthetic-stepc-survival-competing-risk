@@ -114,6 +114,8 @@ Step C2 performs cause-specific survival model comparison. It treats `status = 1
 
 Step C3 evaluates 5-year care-home cumulative incidence under competing risk. Death before care home is treated as a competing event. Death after care-home entry is a secondary post-care-home variable and is not the competing event for the primary endpoint.
 
+Step C4 extends the comparison with Fine-Gray, Random Survival Forest, and Gradient Boosting Survival models. The committed C4 outputs are debug-level summaries only.
+
 ## Local Full-run Results Summary
 
 The following results describe one completed local full run on fully synthetic data. The underlying scenario datasets and per-person predictions are not included here.
@@ -161,6 +163,19 @@ Best fitted Step C3 model by mean 5-year risk MAE against the exported synthetic
 
 Across scenarios, the fitted-model family selected by C2 discrimination and C3 absolute-risk accuracy agreed in 8 of 8 scenarios after mapping the cause-specific model families. In S7, the stronger death competing-risk scenario, the best C3 fitted model had mean MAE 0.0367 compared with 0.1088 for the Aalen-Johansen null baseline.
 
+Step C4 debug completed all eight scenarios with two repetitions per scenario:
+
+```text
+8 scenarios x 2 repetitions x 10 model entries = 160 rows
+Core classical model failures = 0
+Fine-Gray = completed
+RSF = completed
+GBSA = completed
+DeepSurv / DeepHit = skipped because optional pycox/torchtuples dependencies were unavailable
+```
+
+The C4 debug run is not a publication-ready full run. It confirms that the extended classical models execute under the strict synthetic-only leakage guard. The oracle/audit table flagged GBSA calibration slopes outside the prespecified audit range, so GBSA calibration requires further review before interpretation.
+
 ## Scientific Interpretation
 
 These are synthetic benchmark results, not real clinical performance estimates. The main interpretation is that a carefully specified Cox model is robust across most simulated settings, while the high-dimensional sparse MRI scenario is the clearest case where the all-safe penalised Cox model performs best. XGBoost did not unrealistically exceed the oracle benchmark, supporting the strict leakage guard.
@@ -178,6 +193,7 @@ These are synthetic benchmark results, not real clinical performance estimates. 
 - [Data governance and export safety](docs/08_data_governance_and_export_safety.md)
 - [Limitations and next steps](docs/09_limitations_and_next_steps.md)
 - [Reproducibility guide](docs/10_github_reproducibility_guide.md)
+- [Step C4 extended model comparison](docs/11_stepC4_extended_model_comparison.md)
 
 ## Future Work
 

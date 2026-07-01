@@ -1,0 +1,15 @@
+dependency,language,required_for,available,version_or_status,failure_reason
+numpy,python,core_or_plotting,True,1.24.4,
+pandas,python,core_or_plotting,True,2.3.3,
+scipy,python,core_or_plotting,True,1.9.1,
+sklearn,python,core_or_plotting,True,1.5.2,
+lifelines,python,core_or_plotting,True,0.30.0,
+sksurv,python,core_or_plotting,True,0.23.1,
+xgboost,python,core_or_plotting,True,2.1.4,
+matplotlib,python,core_or_plotting,True,3.5.2,
+torch,python,optional_deep,True,2.0.0,
+torchtuples,python,optional_deep,False,,ModuleNotFoundError: No module named 'torchtuples'
+pycox,python,optional_deep,False,,ModuleNotFoundError: No module named 'pycox'
+Rscript,R,Fine-Gray,True,available,
+survival,R,Fine-Gray,True,available,
+cmprsk,R,Fine-Gray,True,available,
