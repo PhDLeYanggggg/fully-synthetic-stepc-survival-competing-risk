@@ -172,6 +172,8 @@ def parse_args() -> Config:
     parser.add_argument("--horizon", type=float, default=HORIZON_YEARS)
     parser.add_argument("--rerun-failed", action="store_true")
     args = parser.parse_args()
+    if args.debug and args.full:
+        parser.error("Use either --debug or --full, not both.")
 
     debug_mode = DEBUG_MODE
     max_reps = MAX_REPS_PER_SCENARIO
@@ -183,7 +185,8 @@ def parse_args() -> Config:
         max_reps = MAX_REPS_PER_SCENARIO
     if args.max_reps is not None:
         max_reps = args.max_reps
-        debug_mode = True
+        if not args.full:
+            debug_mode = True
 
     return Config(
         data_dir=args.data_dir,
@@ -199,6 +202,28 @@ def parse_args() -> Config:
     )
 
 
+def run_mode_label(config: Config) -> str:
+    if config.debug_mode:
+        return "debug"
+    if config.max_reps_per_scenario is not None:
+        return f"full_limited_{config.max_reps_per_scenario}_reps"
+    return "full"
+
+
+def run_metadata(config: Config) -> Dict[str, Any]:
+    return {
+        "run_mode": run_mode_label(config),
+        "horizon_years": float(config.horizon_years),
+        "test_size": float(config.test_size),
+        "random_seed": int(config.random_seed),
+        "max_reps_per_scenario": "" if config.max_reps_per_scenario is None else int(config.max_reps_per_scenario),
+    }
+
+
+def is_publication_full_run(config: Config) -> bool:
+    return (not config.debug_mode) and config.max_reps_per_scenario is None
+
+
 def make_output_dirs(config: Config) -> Dict[str, Path]:
     root = config.out_dir
     paths = {
@@ -211,6 +236,50 @@ def make_output_dirs(config: Config) -> Dict[str, Path]:
     for path in paths.values():
         path.mkdir(parents=True, exist_ok=True)
     return paths
+
+
+def prepare_run_outputs(config: Config, paths: Dict[str, Path]) -> None:
+    """Keep debug, full-limited, and full checkpoints from contaminating each other."""
+
+    perf_path = paths["tables"] / "replicate_extended_model_performance.csv"
+    if not perf_path.exists():
+        return
+    try:
+        existing = pd.read_csv(perf_path)
+    except Exception:
+        existing = pd.DataFrame()
+    if existing.empty:
+        return
+
+    desired_mode = run_mode_label(config)
+    if "run_mode" in existing.columns:
+        existing_modes = sorted(str(x) for x in existing["run_mode"].dropna().unique())
+    else:
+        existing_modes = ["legacy_without_run_mode"]
+    if existing_modes == [desired_mode]:
+        return
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_dir = paths["root"] / f"{'_'.join(existing_modes)}_snapshot_before_{desired_mode}_{stamp}"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    for key in ["tables", "figures", "predictions"]:
+        src_dir = paths[key]
+        dst_dir = archive_dir / key
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        for file in src_dir.iterdir():
+            if file.is_file():
+                shutil.copy2(file, dst_dir / file.name)
+                file.unlink()
+
+    readme = paths["root"] / "README_stepC4_extended_model_comparison.md"
+    if readme.exists():
+        shutil.copy2(readme, archive_dir / readme.name)
+        readme.unlink()
+    print(
+        f"Archived existing C4 outputs with run mode(s) {existing_modes} to {archive_dir} before starting {desired_mode}.",
+        flush=True,
+    )
 
 
 def import_status(module_name: str) -> Tuple[bool, str, str]:
@@ -417,13 +486,17 @@ def data_file_audit(config: Config, paths: Dict[str, Path]) -> pd.DataFrame:
     return out
 
 
-def get_existing_successes(perf_path: Path, rerun_failed: bool) -> set[Tuple[str, int, str]]:
+def get_existing_successes(perf_path: Path, config: Config) -> set[Tuple[str, int, str]]:
     if not perf_path.exists():
         return set()
     df = pd.read_csv(perf_path)
     if df.empty:
         return set()
-    if rerun_failed:
+    if "run_mode" in df.columns:
+        df = df.loc[df["run_mode"].astype(str) == run_mode_label(config)]
+    else:
+        return set()
+    if config.rerun_failed:
         df = df.loc[(df["failed"] == False) & (df["skipped"] == False)]  # noqa: E712
     else:
         df = df.loc[(df["failed"] == False)]
@@ -1117,13 +1190,15 @@ def aggregate_metric(group: pd.DataFrame, metric: str) -> Dict[str, Any]:
     }
 
 
-def aggregate_results(paths: Dict[str, Path]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def aggregate_results(paths: Dict[str, Path], config: Config) -> Tuple[pd.DataFrame, pd.DataFrame]:
     perf_path = paths["tables"] / "replicate_extended_model_performance.csv"
     if not perf_path.exists():
         empty = pd.DataFrame()
         empty.to_csv(paths["tables"] / "scenario_extended_model_summary_mean_sd_ci.csv", index=False)
         return empty, empty
     df = pd.read_csv(perf_path)
+    if "run_mode" in df.columns:
+        df = df.loc[df["run_mode"].astype(str) == run_mode_label(config)].copy()
     summary_rows = []
     for (scenario_id, model), group in df.groupby(["scenario_id", "model"], dropna=False):
         row: Dict[str, Any] = {
@@ -1147,6 +1222,8 @@ def aggregate_results(paths: Dict[str, Path]) -> Tuple[pd.DataFrame, pd.DataFram
     cal_path = paths["tables"] / "calibration_deciles_replicate_level_C4.csv"
     if cal_path.exists():
         cal = pd.read_csv(cal_path)
+        if "run_mode" in cal.columns:
+            cal = cal.loc[cal["run_mode"].astype(str) == run_mode_label(config)].copy()
         if not cal.empty:
             cal_summary = (
                 cal.groupby(["scenario_id", "model", "decile"], dropna=False)
@@ -1481,8 +1558,9 @@ def full_run_sanity_checks(
     core_available_completed = all(m in successful_models for m in core_available if m != MODEL_FINEGRAY_SAFE_REDUCED)
     full_shape_ok = observed_scenarios == expected_scenarios and min_reps >= expected_reps and max_reps >= expected_reps
     full_run_passed = bool(export_safety_passed and predictor_leakage_passed and full_shape_ok and core_available_completed and failed_fits == 0)
-    publication_ready = bool((not config.debug_mode) and full_run_passed and finegray_completed and (rsf_completed or gbsa_completed) and oracle_sanity_passed)
+    publication_ready = bool(is_publication_full_run(config) and full_run_passed and finegray_completed and (rsf_completed or gbsa_completed) and oracle_sanity_passed)
     rows = [
+        ("run_mode", run_mode_label(config), run_mode_label(config), True),
         ("expected_scenarios", expected_scenarios, expected_scenarios, observed_scenarios == expected_scenarios),
         ("observed_scenarios", expected_scenarios, observed_scenarios, observed_scenarios == expected_scenarios),
         ("expected_reps_per_scenario", expected_reps, expected_reps, True),
@@ -1601,7 +1679,7 @@ def write_readme(
         "",
         "## Run Status",
         "",
-        f"- Mode: {'debug' if config.debug_mode else 'full'}",
+        f"- Mode: {run_mode_label(config)}",
         f"- Started: {started_at.isoformat(timespec='seconds')}",
         f"- Finished: {finished_at.isoformat(timespec='seconds')}",
         f"- Scenarios observed: {perf['scenario_id'].nunique() if not perf.empty else 0}",
@@ -1706,7 +1784,8 @@ def process_all(config: Config, paths: Dict[str, Path], dep: pd.DataFrame, dgm_p
     reduced_path = paths["tables"] / "predictor_list_all_safe_reduced_C4_by_replicate.csv"
     pred_sample_path = paths["predictions"] / "debug_prediction_sample_C4.csv"
     cal_path = paths["tables"] / "calibration_deciles_replicate_level_C4.csv"
-    existing = get_existing_successes(perf_path, config.rerun_failed)
+    existing = get_existing_successes(perf_path, config)
+    metadata = run_metadata(config)
 
     pred_sample_written = len(pd.read_csv(pred_sample_path)) if pred_sample_path.exists() else 0
     for file in scenario_files(config):
@@ -1736,15 +1815,21 @@ def process_all(config: Config, paths: Dict[str, Path], dep: pd.DataFrame, dgm_p
                     dep,
                     config,
                 )
+                row.update(metadata)
                 append_csv(perf_path, [row])
                 if reduced_record is not None:
+                    reduced_record.update(metadata)
                     append_csv(reduced_path, [reduced_record])
                 if pred_sample is not None and pred_sample_written < DEBUG_PRED_SAMPLE_N:
                     remaining = DEBUG_PRED_SAMPLE_N - pred_sample_written
-                    to_write = pred_sample.head(remaining)
+                    to_write = pred_sample.head(remaining).copy()
+                    for key, value in metadata.items():
+                        to_write[key] = value
                     append_csv(pred_sample_path, to_write.to_dict("records"))
                     pred_sample_written += len(to_write)
                 if deciles is not None and not deciles.empty:
+                    for key, value in metadata.items():
+                        deciles[key] = value
                     append_csv(cal_path, deciles.to_dict("records"))
                 status = "ok"
                 if row.get("skipped"):
@@ -1773,6 +1858,8 @@ def rebuild_calibration_deciles(
     if not perf_path.exists():
         return
     perf = pd.read_csv(perf_path)
+    if "run_mode" in perf.columns:
+        perf = perf.loc[perf["run_mode"].astype(str) == run_mode_label(config)].copy()
     ok = perf.loc[
         (perf["failed"] == False)  # noqa: E712
         & (perf["skipped"] == False)  # noqa: E712
@@ -1785,6 +1872,8 @@ def rebuild_calibration_deciles(
     rows_written = 0
     if cal_path.exists():
         existing = pd.read_csv(cal_path)
+        if "run_mode" in existing.columns:
+            existing = existing.loc[existing["run_mode"].astype(str) == run_mode_label(config)].copy()
         done = set(zip(existing.get("scenario_id", []), existing.get("replicate_id", []), existing.get("model", []))) if not existing.empty else set()
     else:
         done = set()
@@ -1816,6 +1905,8 @@ def rebuild_calibration_deciles(
                     continue
                 dec = calibration_deciles_for_prediction(scenario_id, replicate_id, model, test_df, pred, config.horizon_years)
                 if not dec.empty:
+                    for key_meta, value_meta in run_metadata(config).items():
+                        dec[key_meta] = value_meta
                     append_csv(cal_path, dec.to_dict("records"))
                     rows_written += len(dec)
             except Exception as exc:
@@ -1832,9 +1923,10 @@ def main() -> None:
     config = parse_args()
     np.random.seed(config.random_seed)
     paths = make_output_dirs(config)
+    prepare_run_outputs(config, paths)
 
     print("Step C4 extended model comparison", flush=True)
-    print(f"Mode: {'debug' if config.debug_mode else 'full'}", flush=True)
+    print(f"Mode: {run_mode_label(config)}", flush=True)
     print(f"DATA_DIR={config.data_dir}", flush=True)
     print(f"OUT_DIR={config.out_dir}", flush=True)
     print(f"MAX_REPS_PER_SCENARIO={config.max_reps_per_scenario}", flush=True)
@@ -1847,11 +1939,13 @@ def main() -> None:
     process_all(config, paths, dep, dgm_predictors, all_safe_predictors)
     rebuild_calibration_deciles(config, paths, dep, dgm_predictors, all_safe_predictors)
 
-    c4_summary, cal_summary = aggregate_results(paths)
+    c4_summary, cal_summary = aggregate_results(paths, config)
     combine_with_c2_c3(config, paths, c4_summary)
     oracle_audit = oracle_sanity_audit(config, paths, c4_summary)
     scenario_interpretation(paths, c4_summary, oracle_audit)
     perf = pd.read_csv(paths["tables"] / "replicate_extended_model_performance.csv") if (paths["tables"] / "replicate_extended_model_performance.csv").exists() else pd.DataFrame()
+    if "run_mode" in perf.columns:
+        perf = perf.loc[perf["run_mode"].astype(str) == run_mode_label(config)].copy()
     sanity = full_run_sanity_checks(config, paths, perf, dep, oracle_audit)
     make_figures(paths, c4_summary, oracle_audit, cal_summary)
     finished_at = datetime.now()
@@ -1861,7 +1955,7 @@ def main() -> None:
     skipped_models = sorted(perf.loc[perf["skipped"] == True, "model"].unique().tolist()) if not perf.empty else []  # noqa: E712
     failed_models = sorted(perf.loc[perf["failed"] == True, "model"].unique().tolist()) if not perf.empty else []  # noqa: E712
     print("\nStep C4 complete", flush=True)
-    print(f"mode: {'debug' if config.debug_mode else 'full'}", flush=True)
+    print(f"mode: {run_mode_label(config)}", flush=True)
     print(f"total_runtime_sec: {time.perf_counter() - perf_start:.2f}", flush=True)
     print(f"output_folder: {paths['root']}", flush=True)
     print(f"number_of_scenarios: {perf['scenario_id'].nunique() if not perf.empty else 0}", flush=True)
