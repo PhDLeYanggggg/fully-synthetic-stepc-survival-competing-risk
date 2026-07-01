@@ -1,0 +1,13 @@
+check_name,expected,observed,passed
+expected_replicate_model_rows,1600,1600,True
+observed_replicate_model_rows,1600,1600,True
+expected_scenarios,8,8,True
+observed_scenarios,8,8,True
+expected_reps_per_scenario,50,50,True
+observed_min_reps_per_scenario,50,50,True
+observed_max_reps_per_scenario,50,50,True
+total_failed_model_fits,logged and <=5%,0,True
+export_safety_passed,True,True,True
+any_forbidden_predictor_flag,False,False,True
+any_oracle_sanity_flag,False,False,True
+full_run_passed,True,True,True

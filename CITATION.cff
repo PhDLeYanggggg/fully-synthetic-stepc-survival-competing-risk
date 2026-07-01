@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite this repository."
+title: "SLAM-informed Synthetic Simulation for Dementia Institutionalisation Prediction"
+authors:
+  - family-names: "Le"
+    given-names: "Yangyue"
+year: 2026
+license: MIT
+repository-code: "https://github.com/PhDLeYanggggg/fully-synthetic-stepc-survival-competing-risk"
+abstract: "Code and documentation for a fully synthetic survival and competing-risk simulation framework for dementia institutionalisation prediction."

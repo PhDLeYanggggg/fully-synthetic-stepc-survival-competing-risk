@@ -1,0 +1,16 @@
+name: slam-synthetic-institutionalisation
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.9
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - lifelines
+  - xgboost
+  - matplotlib
+  - openpyxl
+  - xlsxwriter
+  - jupyter
+  - pytest

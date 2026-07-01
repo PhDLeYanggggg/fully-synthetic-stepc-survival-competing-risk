@@ -21,8 +21,8 @@ patient identifiers.
 
 Run
 ---
-Debug mode: ``python stepC3_competing_risk_evaluation.py --debug``.
-Full mode: ``python stepC3_competing_risk_evaluation.py --full``.
+Debug mode: ``python src/stepC3_competing_risk/stepC3_competing_risk_evaluation.py --debug``.
+Full mode: ``python src/stepC3_competing_risk/stepC3_competing_risk_evaluation.py --full``.
 
 Models
 ------

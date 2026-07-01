@@ -5,3 +5,7 @@ scikit-learn
 lifelines
 xgboost
 matplotlib
+openpyxl
+xlsxwriter
+jupyter
+pytest

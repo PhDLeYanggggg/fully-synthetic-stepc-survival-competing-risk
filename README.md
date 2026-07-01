@@ -1,28 +1,108 @@
-# Fully Synthetic Step C Survival and Competing-Risk Evaluation
+# SLAM-informed Synthetic Simulation for Dementia Institutionalisation Prediction
 
-This repository contains code-only analysis pipelines for model comparison on a fully synthetic dementia care-home institutionalisation benchmark.
+This repository contains a code and documentation release for a synthetic simulation framework inspired by the structure of SLAM dementia imaging and clinical data. The project evaluates survival and competing-risk methods for predicting care-home entry or institutionalisation.
 
-No data files, generated tables, figures, per-person predictions, or compressed scenario datasets are included in this repository.
+The repository is intentionally code-first. It does not contain real SLAM data, internal semi-synthetic SLAM data, large synthetic scenario datasets, raw spreadsheets, identifiers, or per-person prediction files.
 
-## Repository contents
+## Research Aim
 
-- `stepC2_fully_synthetic_model_comparison.py`: cause-specific survival model comparison for time to care-home entry.
-- `stepC3_competing_risk_evaluation.py`: 5-year competing-risk cumulative-incidence evaluation for care-home entry in the presence of death before care home.
-- `requirements.txt`: Python package requirements.
+The motivation is methodological. Real care-home entry dates were not yet available for direct prognostic modelling, so the project first builds a controlled simulation framework to test the modelling pipeline, outcome coding, competing-death handling, model comparison workflow, and leakage controls before applying similar methods to real outcomes.
 
-## Data boundary
-
-The scripts expect a local synthetic export folder named:
+The simulation route is:
 
 ```text
-fully_synthetic_stepC_v1/
+Real SLAM diagnostic data structure
+    |
+Internal semi-synthetic Step B
+    |
+Fully synthetic exportable Step C
+    |
+Step C2 cause-specific model comparison
+    |
+Step C3 competing-risk 5-year risk evaluation
 ```
 
-That folder is not included here. The analyses are designed to use only exportable fully synthetic files from that folder. They do not require, read, or assume access to any real SLAM records, raw clinical files, Step B files, death spreadsheets, WMH spreadsheets, or semi-synthetic data.
+## Repository Contents
 
-The expected local input includes synthetic scenario datasets plus audit and metadata tables, including `export_safety_audit.csv`, `feature_dictionary.csv`, `dgm_definition_table.csv`, `scenario_summary.csv`, and `repetition_summary.csv`.
+```text
+.
+├── README.md
+├── LICENSE
+├── requirements.txt
+├── environment.yml
+├── docs/
+├── src/
+│   ├── stepC_generator/
+│   ├── stepC2_model_comparison/
+│   └── stepC3_competing_risk/
+├── scripts/
+├── results_summary/
+└── tests/
+```
 
-## Analysis design
+The root-level C2 and C3 scripts are retained for backward compatibility. The organised source copies live under `src/`.
+
+## Data Governance Statement
+
+This GitHub repository does not include:
+
+- real SLAM patient-level data
+- Step B internal semi-synthetic SLAM data
+- raw CSV or Excel files
+- death-date or WMH spreadsheets
+- real identifiers or scan-level identifiers
+- large fully synthetic scenario datasets
+- per-person prediction files
+- fitted model binary files
+
+The repository includes only code, documentation, environment files, and small aggregate summary/audit tables from a fully synthetic local run. Real data must remain inside the authorised research environment.
+
+See [Data Governance and Export Safety](docs/08_data_governance_and_export_safety.md) for the detailed rules.
+
+## Quick Start
+
+Create an environment with either pip:
+
+```bash
+pip install -r requirements.txt
+```
+
+or conda:
+
+```bash
+conda env create -f environment.yml
+conda activate slam-synthetic-institutionalisation
+```
+
+The C2/C3 scripts expect a local data folder named `fully_synthetic_stepC_v1/`. That folder is not included in this repository.
+
+Run Step C2 in debug mode:
+
+```bash
+bash scripts/run_stepC2_debug.sh
+```
+
+Run Step C2 in full mode:
+
+```bash
+bash scripts/run_stepC2_full.sh
+```
+
+Run Step C3 in debug mode:
+
+```bash
+bash scripts/run_stepC3_debug.sh
+```
+
+Run Step C3 in full mode:
+
+```bash
+bash scripts/run_stepC3_full.sh
+```
+
+If `fully_synthetic_stepC_v1/` is not present, the modelling scripts will not run. The tests do not run the full analyses.
+
+## Methods Summary
 
 The primary endpoint is time to care-home entry or institutionalisation. The outcome coding is:
 
@@ -30,54 +110,20 @@ The primary endpoint is time to care-home entry or institutionalisation. The out
 - `status = 1`: care-home entry, the event of interest
 - `status = 2`: death before care home, a competing event
 
-Step C2 uses cause-specific survival modelling, where `status = 1` is treated as the event and `status = 0` or `status = 2` are treated as censored for the care-home endpoint.
+Step C2 performs cause-specific survival model comparison. It treats `status = 1` as the event and treats `status = 0` and `status = 2` as censored.
 
-Step C3 evaluates 5-year cumulative incidence under competing risk. It compares oracle synthetic risk, an Aalen-Johansen null baseline, and cause-specific Cox cumulative-incidence reconstructions.
+Step C3 evaluates 5-year care-home cumulative incidence under competing risk. Death before care home is treated as a competing event. Death after care-home entry is a secondary post-care-home variable and is not the competing event for the primary endpoint.
 
-Both scripts process one scenario file at a time and one replicate at a time, with debug-first defaults:
+## Local Full-run Results Summary
+
+The following results describe one completed local full run on fully synthetic data. The underlying scenario datasets and per-person predictions are not included here.
+
+Step C2 completed 1,600 scenario-replicate-model evaluations:
 
 ```text
-DEBUG_MODE = True
-MAX_REPS_PER_SCENARIO = 2
+8 scenarios x 50 repetitions x 4 models = 1,600 rows
+Failures = 0
 ```
-
-Run the debug mode first:
-
-```bash
-python stepC2_fully_synthetic_model_comparison.py
-python stepC3_competing_risk_evaluation.py
-```
-
-Run the full synthetic benchmark:
-
-```bash
-python stepC2_fully_synthetic_model_comparison.py --full
-python stepC3_competing_risk_evaluation.py --full
-```
-
-## Models
-
-Step C2 evaluates:
-
-- `oracle_true_lp_not_a_model`: benchmark using the known synthetic data-generating truth.
-- `cox_dgm_features`: cause-specific Cox model using DGM-relevant synthetic baseline features.
-- `penalised_cox_all_safe_predictors`: penalised Cox model using all strict leakage-guarded safe baseline predictors.
-- `xgb_survival_cox_strict`: XGBoost `survival:cox` risk-score model using the same strict safe predictors.
-
-Step C3 evaluates:
-
-- `oracle_true_risk_not_a_model`: benchmark using the exported synthetic 5-year care-home risk.
-- `nonparametric_aj_null`: Aalen-Johansen nonparametric null prediction.
-- `cs_cox_dgm_cif`: cause-specific Cox cumulative-incidence prediction using DGM-relevant features.
-- `cs_penalised_cox_all_safe_cif`: cause-specific Cox cumulative-incidence prediction using strict all-safe predictors.
-
-Fine-Gray evaluation is treated as optional in this version and is not required for the mandatory Python-only pipeline.
-
-## Local full-run summary
-
-The following summary describes one completed local full run on the fully synthetic export. The underlying data, replicate-level predictions, tables, and figures are not included in this repository.
-
-Step C2 completed 1,600 scenario-replicate-model evaluations: 8 scenarios x 50 replicates x 4 models, with 0 model failures. The oracle is interpreted as an upper benchmark under the simulated data-generating mechanism, not as a deployable model.
 
 Best fitted Step C2 model by mean Harrell C-index:
 
@@ -92,31 +138,56 @@ Best fitted Step C2 model by mean Harrell C-index:
 | S6_highdim_sparseMRI_inst30 | penalised_cox_all_safe_predictors | 0.7097 |
 | S7_strong_death_competing_inst30 | cox_dgm_features | 0.6925 |
 
-Step C3 completed 1,600 scenario-replicate-model evaluations: 8 scenarios x 50 replicates x 4 mandatory models, with 0 model failures. Oracle sanity checks passed, and no forbidden predictors were included. Optional Fine-Gray modelling was skipped because `cmprsk` was unavailable in the local R environment.
+Step C3 completed 1,600 mandatory competing-risk evaluations:
 
-Best fitted Step C3 model by mean 5-year risk MAE versus the exported synthetic true risk:
+```text
+8 scenarios x 50 repetitions x 4 main models = 1,600 rows
+Failures = 0
+Oracle sanity flags = 0
+```
 
-| Scenario | Best fitted model | Mean MAE |
-| --- | --- | ---: |
-| S0_linear_PH_inst30 | cs_cox_dgm_cif | 0.0371 |
-| S1_linear_PH_inst15 | cs_cox_dgm_cif | 0.0271 |
-| S2_linear_PH_inst45 | cs_cox_dgm_cif | 0.0401 |
-| S3_nonlinear_interaction_inst30 | cs_cox_dgm_cif | 0.0525 |
-| S4_nonPH_inst30 | cs_cox_dgm_cif | 0.0499 |
-| S5_MAR_missingness_inst30 | cs_cox_dgm_cif | 0.0402 |
-| S6_highdim_sparseMRI_inst30 | cs_penalised_cox_all_safe_cif | 0.0456 |
-| S7_strong_death_competing_inst30 | cs_cox_dgm_cif | 0.0367 |
+Best fitted Step C3 model by mean 5-year risk MAE against the exported synthetic true risk:
 
-Across scenarios, the fitted model family selected by C2 discrimination and C3 absolute-risk accuracy agreed in 8 of 8 scenarios after mapping the cause-specific model families. In S7, which strengthens the death competing-risk mechanism, the best C3 fitted model had mean MAE 0.0367 compared with 0.1088 for the Aalen-Johansen null baseline.
+| Scenario | Best fitted model | MAE | Brier | AUC | Calibration slope |
+| --- | --- | ---: | ---: | ---: | ---: |
+| S0_linear_PH_inst30 | cs_cox_dgm_cif | 0.0371 | 0.1912 | 0.6860 | 0.9483 |
+| S1_linear_PH_inst15 | cs_cox_dgm_cif | 0.0271 | 0.1217 | 0.6668 | 0.8879 |
+| S2_linear_PH_inst45 | cs_cox_dgm_cif | 0.0401 | 0.2200 | 0.6929 | 0.9498 |
+| S3_nonlinear_interaction_inst30 | cs_cox_dgm_cif | 0.0525 | 0.1808 | 0.7252 | 0.9118 |
+| S4_nonPH_inst30 | cs_cox_dgm_cif | 0.0499 | 0.1950 | 0.6668 | 0.8777 |
+| S5_MAR_missingness_inst30 | cs_cox_dgm_cif | 0.0402 | 0.1930 | 0.6770 | 0.9098 |
+| S6_highdim_sparseMRI_inst30 | cs_penalised_cox_all_safe_cif | 0.0456 | 0.1834 | 0.7175 | 0.8793 |
+| S7_strong_death_competing_inst30 | cs_cox_dgm_cif | 0.0367 | 0.1940 | 0.6711 | 0.9334 |
 
-## Interpretation
+Across scenarios, the fitted-model family selected by C2 discrimination and C3 absolute-risk accuracy agreed in 8 of 8 scenarios after mapping the cause-specific model families. In S7, the stronger death competing-risk scenario, the best C3 fitted model had mean MAE 0.0367 compared with 0.1088 for the Aalen-Johansen null baseline.
 
-The results support the pipeline sanity checks expected under the synthetic design:
+## Scientific Interpretation
 
-- DGM-feature Cox models perform close to the oracle benchmark in the linear proportional-hazards scenarios.
-- The strict all-safe penalised Cox model is most useful in the high-dimensional sparse MRI scenario.
-- XGBoost is restricted to risk-score evaluation in Step C2 and is not assigned fabricated absolute 5-year risk.
-- XGBoost does not unrealistically exceed the oracle benchmark, which supports the leakage guard.
-- The competing-risk evaluation gives a more appropriate 5-year absolute-risk view when death before care home is common.
+These are synthetic benchmark results, not real clinical performance estimates. The main interpretation is that a carefully specified Cox model is robust across most simulated settings, while the high-dimensional sparse MRI scenario is the clearest case where the all-safe penalised Cox model performs best. XGBoost did not unrealistically exceed the oracle benchmark, supporting the strict leakage guard.
 
-These findings are benchmark results on fully synthetic data. They should not be interpreted as clinical performance on real patients.
+## Documentation
+
+- [Project overview](docs/00_project_overview.md)
+- [Research rationale](docs/01_research_rationale.md)
+- [Workflow from SLAM to synthetic evaluation](docs/02_workflow_from_SLAM_to_synthetic.md)
+- [Internal Step B semi-synthetic stage](docs/03_stepB_internal_semi_synthetic.md)
+- [Step C fully synthetic generator](docs/04_stepC_fully_synthetic_generator.md)
+- [Step C2 model comparison](docs/05_stepC2_model_comparison.md)
+- [Step C3 competing-risk evaluation](docs/06_stepC3_competing_risk_evaluation.md)
+- [Results summary](docs/07_results_summary.md)
+- [Data governance and export safety](docs/08_data_governance_and_export_safety.md)
+- [Limitations and next steps](docs/09_limitations_and_next_steps.md)
+- [Reproducibility guide](docs/10_github_reproducibility_guide.md)
+
+## Future Work
+
+- Apply the pipeline to real care-home outcomes when they become available.
+- Add a formal Fine-Gray implementation.
+- Add IPCW Brier scores and time-dependent AUC.
+- Evaluate multiple horizons, for example 1, 3, and 5 years.
+- Export exact DGM coefficients for more precise oracle comparisons.
+- Run sensitivity analyses for the post-care-home death-hazard multiplier.
+
+## License
+
+This code is released under the MIT License. See [LICENSE](LICENSE).

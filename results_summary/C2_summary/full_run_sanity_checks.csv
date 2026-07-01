@@ -1,0 +1,13 @@
+check_name,expected,observed,passed,detail
+expected_replicate_model_rows,1600,1600,True,Full-run target is 8 scenarios x 50 reps x 4 models.
+observed_replicate_model_rows,1600,1600,True,"Rows after de-duplicating by scenario_id, replicate_id, and model."
+expected_scenarios,8,8,True,Expected synthetic Step C scenario count.
+observed_scenarios,8,8,True,Unique scenarios represented in replicate_model_performance.csv.
+expected_reps_per_scenario,50,50,True,Expected repetition count per synthetic scenario.
+observed_min_reps_per_scenario,50,50,True,Minimum unique replicate count over scenarios.
+observed_max_reps_per_scenario,50,50,True,Maximum unique replicate count over scenarios.
+total_failed_model_fits,logged and <=5%,0,True,failure_log rows=0; observed rows=1600.
+any_xgb_oracle_sanity_flag,False,False,True,True if XGBoost exceeds oracle by >0.02 or has Spearman true-LP alignment <0.70.
+any_forbidden_predictor_flag,False,False,True,Strict all-safe predictors must not contain forbidden outcome/truth/design names.
+export_safety_passed,True,True,True,Based on audit/export_safety_audit.csv.
+full_run_passed,True,True,True,Composite full-run gate.

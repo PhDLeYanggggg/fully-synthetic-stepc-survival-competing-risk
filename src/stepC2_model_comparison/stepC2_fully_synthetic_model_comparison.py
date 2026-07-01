@@ -19,8 +19,8 @@ patient identifiers.
 
 Run
 ---
-Debug mode: ``python stepC2_fully_synthetic_model_comparison.py --debug``.
-Full mode: ``python stepC2_fully_synthetic_model_comparison.py --full``.
+Debug mode: ``python src/stepC2_model_comparison/stepC2_fully_synthetic_model_comparison.py --debug``.
+Full mode: ``python src/stepC2_model_comparison/stepC2_fully_synthetic_model_comparison.py --full``.
 
 Models
 ------

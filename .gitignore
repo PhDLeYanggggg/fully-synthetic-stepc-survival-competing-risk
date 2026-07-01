@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
+.pytest_cache/
 
 # Local environments
 .venv/
@@ -23,16 +24,54 @@ predictions/
 outputs/
 results/
 
+# Real, internal, or sensitive project file patterns.
+model_dataset*.csv
+Updated_Date_of_Death*.xlsx
+Date_Of_Death*
+WMH.xlsx
+WMH.xls
+WMH.csv
+*BrcId*
+*ScanID*
+*Date_Of_Death*
+*Scan_Date*
+
+# Internal SLAM/semi-synthetic folders.
+slam_inst_sim_v0/
+slam_inst_sim_v0_step2_step3_auto*/
+StepB*/
+stepB*/
+semi_synthetic*/
+*SAFE_IN_SLAM_ONLY*
+
+# Large synthetic datasets and per-person predictions.
+fully_synthetic_stepC_v1/scenario_datasets/*.csv.gz
+**/scenario_datasets/*.csv.gz
+**/predictions/*.csv
+**/debug_prediction_samples.csv
+**/replicate_predictions*.csv
+
 # Tabular, compressed, and document data products.
 *.csv
 *.csv.gz
 *.tsv
 *.xlsx
 *.xls
+*.sav
+*.dta
 *.parquet
 *.feather
+*.h5
+*.hdf5
 *.rds
 *.RData
+*.pkl
+*.joblib
+
+# Allow curated aggregate summary tables committed under results_summary/.
+!results_summary/
+!results_summary/**/
+!results_summary/**/*.csv
 
 # Generated figures/reports.
 *.png
@@ -41,3 +80,9 @@ results/
 *.tif
 *.tiff
 *.pdf
+
+# Transfer packages.
+transfer_packages/
+*.zip
+*.tar
+*.tar.gz
