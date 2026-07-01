@@ -1,0 +1,43 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Local environments
+.venv/
+venv/
+env/
+
+# Input data are intentionally not versioned.
+fully_synthetic_stepC_v1/
+data/
+raw/
+inputs/
+
+# Generated outputs are intentionally not versioned.
+fully_synthetic_stepC2_model_comparison/
+fully_synthetic_stepC3_competing_risk_evaluation/
+tables/
+figures/
+predictions/
+outputs/
+results/
+
+# Tabular, compressed, and document data products.
+*.csv
+*.csv.gz
+*.tsv
+*.xlsx
+*.xls
+*.parquet
+*.feather
+*.rds
+*.RData
+
+# Generated figures/reports.
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.pdf
