@@ -1694,6 +1694,26 @@ def write_readme(
         flagged = oracle_audit.loc[oracle_audit["needs_audit"].fillna(False).astype(bool)]
         flag_counts = flagged.groupby("flag_name").size().to_dict()
         flag_note = "; ".join(f"{k}={v}" for k, v in flag_counts.items())
+    oracle_flag_explanation = "No oracle sanity flags were raised."
+    if any_oracle_flag and not oracle_audit.empty:
+        flagged = oracle_audit.loc[oracle_audit["needs_audit"].fillna(False).astype(bool)]
+        outperform_flags = {"mae_better_than_oracle", "auc_exceeds_oracle", "cindex_exceeds_oracle"}
+        has_outperform_flag = bool(flagged["flag_name"].isin(outperform_flags).any()) if not flagged.empty else False
+        flagged_rows = []
+        for _, row in flagged.head(6).iterrows():
+            flagged_rows.append(
+                f"{row['scenario_id']} / {row['model']} / {row['metric']}={row['model_value']:.4f} ({row['flag_name']})"
+            )
+        flag_detail_text = "; ".join(flagged_rows)
+        oracle_flag_explanation = (
+            "The flagged item requires human review before publication. "
+            + (
+                "At least one fitted model exceeded an oracle-performance screen. "
+                if has_outperform_flag
+                else "No fitted model exceeded the oracle MAE, AUC, or C-index screens; the flag is from a calibration/risk-distribution screen. "
+            )
+            + f"Flagged detail: {flag_detail_text}."
+        )
 
     lines = [
         "# Step C4 Extended Model Comparison",
@@ -1740,12 +1760,14 @@ def write_readme(
         f"- DeepHit status: {deephit_status}.",
         f"- Any oracle sanity flag: {any_oracle_flag}.",
         f"- Oracle/audit flag details: {flag_note}.",
+        f"- Oracle sanity audit interpretation: {oracle_flag_explanation}",
+        f"- Publication readiness: `full_run_passed` can be True while `publication_ready` remains False until oracle sanity flags are reviewed.",
         f"- S6 combined best non-oracle absolute-risk model: {s6_best}.",
         f"- S7 combined best non-oracle absolute-risk model: {s7_best}.",
         f"- S7 Fine-Gray / competing-risk comparison note: {cs_cox_s7_note}",
         f"- RSF versus C3 Cox in S3/S6/S7: S3 {s3_rsf}; S6 {s6_rsf}; S7 {s7_rsf}.",
         f"- GBSA versus C3 Cox in S3/S6/S7: S3 {s3_gbsa}; S6 {s6_gbsa}; S7 {s7_gbsa}.",
-        "- C4 debug does not overturn C2/C3 core conclusions; it establishes that Fine-Gray, RSF, and GBSA can run under the strict synthetic-only leakage guard, while GBSA calibration needs audit.",
+        "- The C4 run does not overturn C2/C3 core conclusions; it establishes that Fine-Gray, RSF, and GBSA can run under the strict synthetic-only leakage guard, while the flagged GBSA calibration screen needs review.",
         "",
         "### C4 Scenario Summary",
         "",

@@ -114,7 +114,7 @@ Step C2 performs cause-specific survival model comparison. It treats `status = 1
 
 Step C3 evaluates 5-year care-home cumulative incidence under competing risk. Death before care home is treated as a competing event. Death after care-home entry is a secondary post-care-home variable and is not the competing event for the primary endpoint.
 
-Step C4 extends the comparison with Fine-Gray, Random Survival Forest, and Gradient Boosting Survival models. The committed C4 outputs are debug-level summaries only.
+Step C4 extends the comparison with Fine-Gray, Random Survival Forest, and Gradient Boosting Survival models. A full C4 run has been completed locally. The committed C4 output files remain debug-level summaries only until the full tables and figures are explicitly reviewed and approved for upload.
 
 ## Local Full-run Results Summary
 
@@ -163,18 +163,20 @@ Best fitted Step C3 model by mean 5-year risk MAE against the exported synthetic
 
 Across scenarios, the fitted-model family selected by C2 discrimination and C3 absolute-risk accuracy agreed in 8 of 8 scenarios after mapping the cause-specific model families. In S7, the stronger death competing-risk scenario, the best C3 fitted model had mean MAE 0.0367 compared with 0.1088 for the Aalen-Johansen null baseline.
 
-Step C4 debug completed all eight scenarios with two repetitions per scenario:
+Step C4 full run completed all eight scenarios with 50 repetitions per scenario:
 
 ```text
-8 scenarios x 2 repetitions x 10 model entries = 160 rows
+8 scenarios x 50 repetitions x 10 model entries = 4,000 rows
 Core classical model failures = 0
 Fine-Gray = completed
 RSF = completed
 GBSA = completed
 DeepSurv / DeepHit = skipped because optional pycox/torchtuples dependencies were unavailable
+full_run_passed = True
+publication_ready = False pending review of one calibration-slope audit flag
 ```
 
-The C4 debug run is not a publication-ready full run. It confirms that the extended classical models execute under the strict synthetic-only leakage guard. The oracle/audit table flagged GBSA calibration slopes outside the prespecified audit range, so GBSA calibration requires further review before interpretation.
+The C4 full run does not overturn the C2/C3 core interpretation. Fine-Gray, RSF, and GBSA completed under the strict synthetic-only leakage guard. The only C4 oracle sanity flag was `S1_linear_PH_inst15 / cs_gbsa_dgm_cif / calibration_slope_5y_mean = 1.6026`; no fitted C4 model exceeded the oracle MAE, AUC, or C-index screens. Full C4 tables and figures remain local pending explicit review.
 
 ## Scientific Interpretation
 

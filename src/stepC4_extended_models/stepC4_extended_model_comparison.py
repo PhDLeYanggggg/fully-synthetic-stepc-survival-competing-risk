@@ -157,6 +157,7 @@ class Config:
     horizon_years: float = HORIZON_YEARS
     rerun_failed: bool = False
     max_new_model_fits: Optional[int] = None
+    log_existing_skips: bool = False
 
 
 def parse_args() -> Config:
@@ -177,6 +178,11 @@ def parse_args() -> Config:
         type=int,
         default=None,
         help="Optional checkpointed chunk size. Runs at most this many new scenario-replicate-model rows, then writes partial summaries and exits.",
+    )
+    parser.add_argument(
+        "--log-existing-skips",
+        action="store_true",
+        help="Print every scenario-replicate-model row skipped by checkpoint resume.",
     )
     args = parser.parse_args()
     if args.debug and args.full:
@@ -207,6 +213,7 @@ def parse_args() -> Config:
         horizon_years=args.horizon,
         rerun_failed=args.rerun_failed,
         max_new_model_fits=args.max_new_model_fits,
+        log_existing_skips=args.log_existing_skips,
     )
 
 
@@ -1687,6 +1694,26 @@ def write_readme(
         flagged = oracle_audit.loc[oracle_audit["needs_audit"].fillna(False).astype(bool)]
         flag_counts = flagged.groupby("flag_name").size().to_dict()
         flag_note = "; ".join(f"{k}={v}" for k, v in flag_counts.items())
+    oracle_flag_explanation = "No oracle sanity flags were raised."
+    if any_oracle_flag and not oracle_audit.empty:
+        flagged = oracle_audit.loc[oracle_audit["needs_audit"].fillna(False).astype(bool)]
+        outperform_flags = {"mae_better_than_oracle", "auc_exceeds_oracle", "cindex_exceeds_oracle"}
+        has_outperform_flag = bool(flagged["flag_name"].isin(outperform_flags).any()) if not flagged.empty else False
+        flagged_rows = []
+        for _, row in flagged.head(6).iterrows():
+            flagged_rows.append(
+                f"{row['scenario_id']} / {row['model']} / {row['metric']}={row['model_value']:.4f} ({row['flag_name']})"
+            )
+        flag_detail_text = "; ".join(flagged_rows)
+        oracle_flag_explanation = (
+            "The flagged item requires human review before publication. "
+            + (
+                "At least one fitted model exceeded an oracle-performance screen. "
+                if has_outperform_flag
+                else "No fitted model exceeded the oracle MAE, AUC, or C-index screens; the flag is from a calibration/risk-distribution screen. "
+            )
+            + f"Flagged detail: {flag_detail_text}."
+        )
 
     lines = [
         "# Step C4 Extended Model Comparison",
@@ -1733,12 +1760,14 @@ def write_readme(
         f"- DeepHit status: {deephit_status}.",
         f"- Any oracle sanity flag: {any_oracle_flag}.",
         f"- Oracle/audit flag details: {flag_note}.",
+        f"- Oracle sanity audit interpretation: {oracle_flag_explanation}",
+        f"- Publication readiness: `full_run_passed` can be True while `publication_ready` remains False until oracle sanity flags are reviewed.",
         f"- S6 combined best non-oracle absolute-risk model: {s6_best}.",
         f"- S7 combined best non-oracle absolute-risk model: {s7_best}.",
         f"- S7 Fine-Gray / competing-risk comparison note: {cs_cox_s7_note}",
         f"- RSF versus C3 Cox in S3/S6/S7: S3 {s3_rsf}; S6 {s6_rsf}; S7 {s7_rsf}.",
         f"- GBSA versus C3 Cox in S3/S6/S7: S3 {s3_gbsa}; S6 {s6_gbsa}; S7 {s7_gbsa}.",
-        "- C4 debug does not overturn C2/C3 core conclusions; it establishes that Fine-Gray, RSF, and GBSA can run under the strict synthetic-only leakage guard, while GBSA calibration needs audit.",
+        "- The C4 run does not overturn C2/C3 core conclusions; it establishes that Fine-Gray, RSF, and GBSA can run under the strict synthetic-only leakage guard, while the flagged GBSA calibration screen needs review.",
         "",
         "### C4 Scenario Summary",
         "",
@@ -1814,14 +1843,26 @@ def process_all(config: Config, paths: Dict[str, Path], dep: pd.DataFrame, dgm_p
         if config.max_reps_per_scenario is not None:
             reps = reps[: config.max_reps_per_scenario]
         print(f"\nScenario {scenario_id}: {len(reps)} reps", flush=True)
+        complete_existing_reps = 0
         for replicate_id in reps:
+            existing_models = {
+                model
+                for model in ALL_MODELS
+                if (scenario_id, int(replicate_id), model) in existing
+            }
+            if len(existing_models) == len(ALL_MODELS):
+                complete_existing_reps += 1
+                if config.log_existing_skips:
+                    print(f"  replicate {replicate_id}: skip complete existing replicate", flush=True)
+                continue
             rep_df = scenario_df.loc[scenario_df["replicate_id"].astype(int) == int(replicate_id)].copy()
             train_df, test_df = split_train_test(rep_df, config, int(replicate_id))
             print(f"  replicate {replicate_id}: train={len(train_df)} test={len(test_df)}", flush=True)
             for model in ALL_MODELS:
                 key = (scenario_id, int(replicate_id), model)
                 if key in existing:
-                    print(f"    skip existing success: {model}", flush=True)
+                    if config.log_existing_skips:
+                        print(f"    skip existing success: {model}", flush=True)
                     continue
                 row, pred_sample, reduced_record, deciles = run_model(
                     model,
@@ -1864,6 +1905,8 @@ def process_all(config: Config, paths: Dict[str, Path], dep: pd.DataFrame, dgm_p
                     )
                     return
 
+        if complete_existing_reps and not config.log_existing_skips:
+            print(f"  skipped {complete_existing_reps} complete existing reps", flush=True)
         del scenario_df
 
 
@@ -1957,6 +2000,7 @@ def main() -> None:
     print(f"OUT_DIR={config.out_dir}", flush=True)
     print(f"MAX_REPS_PER_SCENARIO={config.max_reps_per_scenario}", flush=True)
     print(f"MAX_NEW_MODEL_FITS={config.max_new_model_fits}", flush=True)
+    print(f"LOG_EXISTING_SKIPS={config.log_existing_skips}", flush=True)
 
     validate_export_safety(config)
     dep = dependency_audit(paths)

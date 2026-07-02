@@ -35,4 +35,4 @@ Key C4 files include:
 - `C4_debug_summary/oracle_sanity_audit_C4.csv`
 - `C4_debug_summary/full_run_sanity_checks_C4.csv`
 
-The larger full-run outputs and all figure files remain local unless explicitly reviewed and approved.
+The C4 full run has also been completed locally. The larger full-run C4 outputs and all figure files remain local unless explicitly reviewed and approved.
