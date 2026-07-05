@@ -81,7 +81,6 @@ ALLOWED_BLOCKS = {
     "WMH",
     "comorbidity",
     "deprivation",
-    "diagnosis_reference",
 }
 
 EXCLUDED_BLOCKS = {
@@ -108,6 +107,10 @@ FORBIDDEN_NAME_SUBSTRINGS = [
     "scenario_id",
     "replicate_id",
     "synthetic_id",
+    "not_predictor",
+    "diagnosis_reference",
+    "target_diag",
+    "final_diagnosis",
 ]
 
 KNOWN_COMORBIDITY_COLUMNS = {
@@ -370,8 +373,12 @@ def read_csv_required(path: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def parse_safe_bool(x: Any) -> bool:
+    return str(x).strip().lower() in {"true", "1", "yes"}
+
+
 def bool_series_all_true(series: pd.Series) -> bool:
-    values = series.map(lambda x: str(x).strip().lower() in {"true", "1", "yes"})
+    values = series.map(parse_safe_bool)
     return bool(values.all())
 
 
@@ -445,9 +452,7 @@ def load_and_audit_inputs(config: Config, paths: Dict[str, Path]) -> Dict[str, A
     if "safe_to_export_column_names" not in safety.columns:
         raise ValueError("export_safety_audit.csv lacks safe_to_export_column_names")
     if not bool_series_all_true(safety["safe_to_export_column_names"]):
-        unsafe = safety.loc[
-            ~safety["safe_to_export_column_names"].map(lambda x: str(x).strip().lower() in {"true", "1", "yes"})
-        ]
+        unsafe = safety.loc[~safety["safe_to_export_column_names"].map(parse_safe_bool)]
         raise RuntimeError(
             "Export safety audit failed. Unsafe files:\n" + unsafe.to_string(index=False)
         )
@@ -496,6 +501,11 @@ def contains_forbidden_name(column: str) -> bool:
     return any(token in lower for token in FORBIDDEN_NAME_SUBSTRINGS)
 
 
+def has_not_for_prediction_role(role: str) -> bool:
+    role_lower = str(role).lower()
+    return "not_for_prediction" in role_lower or "not_predictor" in role_lower
+
+
 def derived_block_for_column(column: str, block: str) -> str:
     if column in KNOWN_COMORBIDITY_COLUMNS:
         return "comorbidity"
@@ -530,6 +540,8 @@ def build_predictor_lists(
             reasons.append("not_present_in_scenario_files")
         if block in EXCLUDED_BLOCKS or role in EXCLUDED_BLOCKS:
             reasons.append("excluded_block_or_role")
+        if has_not_for_prediction_role(role):
+            reasons.append("excluded_not_for_prediction_role")
         if forbidden:
             reasons.append("forbidden_name_substring")
         if col == "sex" and "sex_Female" in colset:

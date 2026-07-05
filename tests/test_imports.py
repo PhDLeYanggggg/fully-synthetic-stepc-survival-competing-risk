@@ -17,6 +17,8 @@ def test_organised_script_paths_exist():
         Path("src/stepC2_model_comparison/stepC2_fully_synthetic_model_comparison.py"),
         Path("src/stepC3_competing_risk/stepC3_competing_risk_evaluation.py"),
         Path("src/stepC4_extended_models/stepC4_extended_model_comparison.py"),
+        Path("src/stepC4A_calibration_audit/stepC4A_calibration_audit.py"),
+        Path("src/stepC5A_exact_DGM_coefficients/stepC5A_exact_DGM_coefficients.py"),
     ]
     missing = [str(path) for path in expected if not path.exists()]
     assert not missing, f"Missing expected script paths: {missing}"

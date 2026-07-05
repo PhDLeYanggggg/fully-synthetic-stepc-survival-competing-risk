@@ -20,6 +20,12 @@ Fully synthetic exportable Step C
 Step C2 cause-specific model comparison
     |
 Step C3 competing-risk 5-year risk evaluation
+    |
+Step C4 extended survival and competing-risk model comparison
+    |
+Step C4A calibration-slope audit
+    |
+Step C5A exact DGM coefficient export
 ```
 
 ## Repository Contents
@@ -34,13 +40,30 @@ Step C3 competing-risk 5-year risk evaluation
 ├── src/
 │   ├── stepC_generator/
 │   ├── stepC2_model_comparison/
-│   └── stepC3_competing_risk/
+│   ├── stepC3_competing_risk/
+│   ├── stepC4_extended_models/
+│   ├── stepC4A_calibration_audit/
+│   └── stepC5A_exact_DGM_coefficients/
 ├── scripts/
 ├── results_summary/
 └── tests/
 ```
 
-The root-level C2 and C3 scripts are retained for backward compatibility. The organised source copies live under `src/`.
+The root-level scripts are retained for backward compatibility. The organised
+source copies live under `src/`. See [CODE_INDEX.md](CODE_INDEX.md) for the
+complete code map.
+
+## Current QC Status
+
+The code includes a strict QC patch for predictor filtering and export-safety
+parsing. Reference diagnosis columns such as
+`diagnosis_reference_NOT_PREDICTOR` are excluded by forbidden-name checks,
+removed predictor-block permission, and feature-dictionary role checks. Export
+safety audits now parse strings explicitly, so a value such as `"False"` is not
+treated as truthy.
+
+The QC patch does not add models, change the DGM, or regenerate data. It only
+strengthens predictor leakage controls and safety-gate interpretation.
 
 ## Data Governance Statement
 
@@ -100,6 +123,24 @@ Run Step C3 in full mode:
 bash scripts/run_stepC3_full.sh
 ```
 
+Run Step C4 in debug mode:
+
+```bash
+bash scripts/run_stepC4_debug.sh
+```
+
+Run Step C4A calibration audit:
+
+```bash
+bash scripts/run_stepC4A_calibration_audit.sh
+```
+
+Run Step C5A exact DGM coefficient export:
+
+```bash
+bash scripts/run_stepC5A_exact_DGM_coefficients.sh
+```
+
 If `fully_synthetic_stepC_v1/` is not present, the modelling scripts will not run. The tests do not run the full analyses.
 
 ## Methods Summary
@@ -115,6 +156,10 @@ Step C2 performs cause-specific survival model comparison. It treats `status = 1
 Step C3 evaluates 5-year care-home cumulative incidence under competing risk. Death before care home is treated as a competing event. Death after care-home entry is a secondary post-care-home variable and is not the competing event for the primary endpoint.
 
 Step C4 extends the comparison with Fine-Gray, Random Survival Forest, and Gradient Boosting Survival models. A full C4 run has been completed locally. The committed C4 output files remain debug-level summaries only until the full tables and figures are explicitly reviewed and approved for upload.
+
+Step C4A audits the single C4 calibration-slope sanity flag. Step C5A exports
+the raw DGM coefficient tables from the fully synthetic generator and records
+which components cannot be exactly reconstructed from the current export.
 
 ## Local Full-run Results Summary
 
@@ -178,6 +223,14 @@ publication_ready = False pending review of one calibration-slope audit flag
 
 The C4 full run does not overturn the C2/C3 core interpretation. Fine-Gray, RSF, and GBSA completed under the strict synthetic-only leakage guard. The only C4 oracle sanity flag was `S1_linear_PH_inst15 / cs_gbsa_dgm_cif / calibration_slope_5y_mean = 1.6026`; no fitted C4 model exceeded the oracle MAE, AUC, or C-index screens. Full C4 tables and figures remain local pending explicit review.
 
+Step C4A resolved this as calibration instability for `cs_gbsa_dgm_cif` in the
+low-institutionalisation S1 scenario, not leakage or oracle outperformance.
+
+Step C5A exported exact raw pre-rescaling DGM coefficients locally. The bounded
+true-LP reconstruction audit passed the Spearman >= 0.999 criterion for all
+audited scenario-repetitions except S3, where the generator includes a
+non-exported latent frailty-by-vascular interaction term.
+
 ## Scientific Interpretation
 
 These are synthetic benchmark results, not real clinical performance estimates. The main interpretation is that a carefully specified Cox model is robust across most simulated settings, while the high-dimensional sparse MRI scenario is the clearest case where the all-safe penalised Cox model performs best. XGBoost did not unrealistically exceed the oracle benchmark, supporting the strict leakage guard.
@@ -196,6 +249,9 @@ These are synthetic benchmark results, not real clinical performance estimates. 
 - [Limitations and next steps](docs/09_limitations_and_next_steps.md)
 - [Reproducibility guide](docs/10_github_reproducibility_guide.md)
 - [Step C4 extended model comparison](docs/11_stepC4_extended_model_comparison.md)
+- [Step C4A calibration-slope audit](docs/12_stepC4A_calibration_audit.md)
+- [Step C5A exact DGM coefficients](docs/13_stepC5A_exact_DGM_coefficients.md)
+- [Code index](CODE_INDEX.md)
 
 ## Future Work
 
@@ -203,7 +259,9 @@ These are synthetic benchmark results, not real clinical performance estimates. 
 - Add a formal Fine-Gray implementation.
 - Add IPCW Brier scores and time-dependent AUC.
 - Evaluate multiple horizons, for example 1, 3, and 5 years.
-- Export exact DGM coefficients for more precise oracle comparisons.
+- Export repetition-level raw-LP moments in a future Step C version so final
+  effective DGM coefficients can be reconstructed numerically, not only as raw
+  pre-rescaling coefficients.
 - Run sensitivity analyses for the post-care-home death-hazard multiplier.
 
 ## License

@@ -14,7 +14,10 @@ Step C3 uses cause-specific Cox cumulative-incidence reconstruction. Fine-Gray w
 
 The C3 Brier score is a naive Brier score, not an IPCW Brier score.
 
-The Cox DGM feature list uses a fallback clinically meaningful predictor list because exact DGM coefficients were not exported.
+Earlier C2/C3/C4 DGM-feature models used fallback clinically meaningful predictor
+lists. Step C5A now exports exact raw pre-rescaling DGM coefficients, but final
+effective coefficients still require repetition-level raw-LP centering/scaling
+moments that were not exported in Step C v1.
 
 The post-care-home death-hazard multiplier is a state-risk simulation assumption. It should not be interpreted causally.
 
@@ -27,6 +30,6 @@ Useful future extensions include:
 - IPCW Brier scoring;
 - time-dependent AUC;
 - multi-horizon evaluation at 1, 3, and 5 years;
-- exact DGM coefficient export;
+- export repetition-level raw-LP moments for final effective DGM coefficient reconstruction;
 - sensitivity analyses for the post-care-home death-hazard multiplier;
 - packaging the fully synthetic scenario datasets through an approved data-release channel rather than GitHub source tracking.

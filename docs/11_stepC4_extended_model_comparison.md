@@ -23,12 +23,12 @@ RSF = completed
 GBSA = completed
 DeepSurv / DeepHit = skipped because optional pycox/torchtuples dependencies were unavailable
 full_run_passed = True
-publication_ready = False pending review of one calibration-slope audit flag
+publication_ready = False in the original C4 gate pending review of one calibration-slope audit flag
 ```
 
 The six core classical models completed successfully in every full-run replicate. DeepSurv and DeepHit were skipped because optional deep-learning dependencies were unavailable. There were no failed model fits.
 
-Fine-Gray, RSF, and GBSA therefore all passed the full execution gate. The only C4 oracle sanity flag was `S1_linear_PH_inst15 / cs_gbsa_dgm_cif / calibration_slope_5y_mean = 1.6026`; no fitted C4 model exceeded the oracle MAE, AUC, or C-index screens. This is a calibration-slope review item, so the full run passes technically but is not marked publication-ready until that flag is reviewed.
+Fine-Gray, RSF, and GBSA therefore all passed the full execution gate. The only C4 oracle sanity flag was `S1_linear_PH_inst15 / cs_gbsa_dgm_cif / calibration_slope_5y_mean = 1.6026`; no fitted C4 model exceeded the oracle MAE, AUC, or C-index screens. Step C4A subsequently reviewed this flag and interpreted it as calibration instability for `cs_gbsa_dgm_cif` in the low-institutionalisation S1 scenario, not leakage or oracle outperformance. The flagged model was not the preferred S1 model.
 
 ## GitHub Scope
 
@@ -47,3 +47,9 @@ src/stepC4_extended_models/stepC4_extended_model_comparison.py
 ```
 
 and retained at the repository root for compatibility.
+
+The C4A calibration-audit source code is under:
+
+```text
+src/stepC4A_calibration_audit/stepC4A_calibration_audit.py
+```

@@ -102,7 +102,6 @@ ALLOWED_BLOCKS = {
     "WMH",
     "comorbidity",
     "deprivation",
-    "diagnosis_reference",
 }
 
 EXCLUDED_BLOCKS = {
@@ -130,6 +129,10 @@ FORBIDDEN_NAME_SUBSTRINGS = [
     "scenario_id",
     "replicate_id",
     "synthetic_id",
+    "not_predictor",
+    "diagnosis_reference",
+    "target_diag",
+    "final_diagnosis",
 ]
 
 KNOWN_COMORBIDITY_COLUMNS = {
@@ -345,8 +348,12 @@ def make_output_dirs(config: Config) -> Dict[str, Path]:
     return paths
 
 
+def parse_safe_bool(x: Any) -> bool:
+    return str(x).strip().lower() in {"true", "1", "yes"}
+
+
 def bool_series_all_true(series: pd.Series) -> bool:
-    values = series.map(lambda x: str(x).strip().lower() in {"true", "1", "yes"})
+    values = series.map(parse_safe_bool)
     return bool(values.all())
 
 
@@ -359,6 +366,11 @@ def read_csv_required(path: Path) -> pd.DataFrame:
 def contains_forbidden_name(column: str) -> bool:
     lower = column.lower()
     return any(token in lower for token in FORBIDDEN_NAME_SUBSTRINGS)
+
+
+def has_not_for_prediction_role(role: str) -> bool:
+    role_lower = str(role).lower()
+    return "not_for_prediction" in role_lower or "not_predictor" in role_lower
 
 
 def find_true_risk_column(columns: Sequence[str]) -> str:
@@ -512,6 +524,8 @@ def rebuild_predictors_from_feature_dictionary(
             reasons.append("not_present")
         if block in EXCLUDED_BLOCKS or role in EXCLUDED_BLOCKS:
             reasons.append("excluded_block_or_role")
+        if has_not_for_prediction_role(role):
+            reasons.append("excluded_not_for_prediction_role")
         if forbidden:
             reasons.append("forbidden_name")
         if col == "sex" and "sex_Female" in colset:

@@ -44,6 +44,16 @@ Step B is semi-synthetic because it combines real SLAM baseline predictors with 
 
 Step C is fully synthetic because both predictors and outcomes are synthetic. It can be exported after audit, but the large scenario files are still excluded from GitHub because they are data products rather than source code.
 
+## Predictor and Export-Safety QC Gates
+
+Predictor filters must exclude reference-only diagnosis columns. In particular,
+`diagnosis_reference_NOT_PREDICTOR` and similarly named target/final diagnosis
+reference columns are forbidden by name and by feature-dictionary role.
+
+Export-safety checks parse `safe_to_export_column_names` explicitly as string
+booleans. The string `"False"` is treated as false, not as a truthy non-empty
+string.
+
 ## Pre-commit Safety Checks
 
 Run these commands before committing:

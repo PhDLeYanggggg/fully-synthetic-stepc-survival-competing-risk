@@ -128,6 +128,10 @@ FORBIDDEN_PREDICTOR_SUBSTRINGS = [
     "scenario_id",
     "replicate_id",
     "synthetic_id",
+    "not_predictor",
+    "diagnosis_reference",
+    "target_diag",
+    "final_diagnosis",
 ]
 
 CORE_METRICS = [
@@ -419,6 +423,10 @@ def has_forbidden_name(name: str) -> bool:
     return any(fragment.lower() in lower for fragment in FORBIDDEN_PREDICTOR_SUBSTRINGS)
 
 
+def parse_safe_bool(x: Any) -> bool:
+    return str(x).strip().lower() in {"true", "1", "yes"}
+
+
 def load_predictor_lists(config: Config, paths: Dict[str, Path]) -> Tuple[List[str], List[str], pd.DataFrame]:
     all_safe = read_predictor_list(config.c3_dir / "tables" / "predictor_list_all_safe_C3.csv")
     dgm = read_predictor_list(config.c3_dir / "tables" / "predictor_list_dgm_features_C3.csv")
@@ -465,8 +473,9 @@ def validate_export_safety(config: Config) -> None:
     audit = pd.read_csv(audit_path)
     if "safe_to_export_column_names" not in audit.columns:
         raise ValueError("export_safety_audit.csv lacks safe_to_export_column_names column")
-    if not audit["safe_to_export_column_names"].fillna(False).astype(bool).all():
-        bad = audit.loc[~audit["safe_to_export_column_names"].fillna(False).astype(bool)]
+    safe = audit["safe_to_export_column_names"].map(parse_safe_bool)
+    if not safe.all():
+        bad = audit.loc[~safe]
         raise RuntimeError(f"Export safety audit failed for {len(bad)} rows.")
 
 
@@ -1577,10 +1586,17 @@ def full_run_sanity_checks(
     gbsa_completed = any(m in successful_models for m in [MODEL_GBSA_DGM, MODEL_GBSA_SAFE])
     deephit_completed = any(m in successful_models for m in [MODEL_DEEPHIT_DGM, MODEL_DEEPHIT_SAFE_REDUCED])
     oracle_sanity_passed = bool(oracle_audit.empty or not oracle_audit["needs_audit"].fillna(False).astype(bool).any())
-    predictor_leakage_passed = True
+    leakage_path = paths["tables"] / "predictor_leakage_audit_C4.csv"
+    if leakage_path.exists():
+        try:
+            predictor_leakage_passed = pd.read_csv(leakage_path).empty
+        except pd.errors.EmptyDataError:
+            predictor_leakage_passed = True
+    else:
+        predictor_leakage_passed = False
     export_safety_passed = True
     core_available = [m for m in CORE_MODELS if not (m.startswith("finegray") and not dependency_available(dep, "cmprsk")) and not (m.startswith("cs_") and not dependency_available(dep, "sksurv"))]
-    core_available_completed = all(m in successful_models for m in core_available if m != MODEL_FINEGRAY_SAFE_REDUCED)
+    core_available_completed = all(m in successful_models for m in core_available)
     full_shape_ok = observed_scenarios == expected_scenarios and min_reps >= expected_reps and max_reps >= expected_reps
     full_run_passed = bool(export_safety_passed and predictor_leakage_passed and full_shape_ok and core_available_completed and failed_fits == 0)
     publication_ready = bool(is_publication_full_run(config) and full_run_passed and finegray_completed and (rsf_completed or gbsa_completed) and oracle_sanity_passed)

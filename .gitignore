@@ -18,6 +18,9 @@ inputs/
 # Generated outputs are intentionally not versioned.
 fully_synthetic_stepC2_model_comparison/
 fully_synthetic_stepC3_competing_risk_evaluation/
+fully_synthetic_stepC4_extended_models/
+fully_synthetic_stepC4_calibration_audit/
+fully_synthetic_stepC5A_exact_DGM_coefficients/
 tables/
 figures/
 predictions/

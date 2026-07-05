@@ -30,6 +30,7 @@ at the repository root. That folder is not tracked in GitHub.
 ```bash
 bash scripts/run_stepC2_debug.sh
 bash scripts/run_stepC3_debug.sh
+bash scripts/run_stepC4_debug.sh
 ```
 
 Debug mode runs only a small number of repetitions and is intended as a smoke test.
@@ -39,9 +40,21 @@ Debug mode runs only a small number of repetitions and is intended as a smoke te
 ```bash
 bash scripts/run_stepC2_full.sh
 bash scripts/run_stepC3_full.sh
+bash scripts/run_stepC4_full.sh
 ```
 
 The full run processes all eight scenarios and all 50 repetitions per scenario.
+
+## Run Post-Hoc Audits
+
+```bash
+bash scripts/run_stepC4A_calibration_audit.sh
+bash scripts/run_stepC5A_exact_DGM_coefficients.sh
+```
+
+C4A expects local C4 aggregate outputs. C5A expects the local Step C generator
+notebook and fully synthetic Step C metadata tables. Generated audit outputs
+are intentionally not tracked by Git.
 
 ## Run Tests
 
