@@ -212,19 +212,24 @@ Step C4 full run completed all eight scenarios with 50 repetitions per scenario:
 
 ```text
 8 scenarios x 50 repetitions x 10 model entries = 4,000 rows
-Core classical model failures = 0
+Model failures = 0
+Model skips = 0
 Fine-Gray = completed
 RSF = completed
 GBSA = completed
-DeepSurv / DeepHit = skipped because optional pycox/torchtuples dependencies were unavailable
+DeepSurv = completed
+DeepHit = completed
 full_run_passed = True
-publication_ready = False pending review of one calibration-slope audit flag
+publication_ready = False pending review of oracle-sanity calibration/risk-distribution flags
 ```
 
-The C4 full run does not overturn the C2/C3 core interpretation. Fine-Gray, RSF, and GBSA completed under the strict synthetic-only leakage guard. The only C4 oracle sanity flag was `S1_linear_PH_inst15 / cs_gbsa_dgm_cif / calibration_slope_5y_mean = 1.6026`; no fitted C4 model exceeded the oracle MAE, AUC, or C-index screens. Full C4 tables and figures remain local pending explicit review.
+The C4 full run does not overturn the C2/C3 core interpretation. Fine-Gray, RSF, GBSA, DeepSurv, and DeepHit completed under the strict synthetic-only leakage guard. The deep models were implemented as deterministic NumPy neural-network baselines after the local `pycox`/`torchtuples` training path proved unstable at native runtime level. The updated C4 run has no failed or skipped model fits, but the oracle-sanity audit is not fully clean because several deep-model calibration and risk-distribution checks require review. Full C4 tables and figures remain local pending explicit review.
 
 Step C4A resolved this as calibration instability for `cs_gbsa_dgm_cif` in the
 low-institutionalisation S1 scenario, not leakage or oracle outperformance.
+After adding DeepSurv and DeepHit, C4A should be rerun before using C4 as a
+publication-ready claim, because the deep-model oracle-sanity flags are newer
+than the existing C4A calibration audit.
 
 Step C5A exported exact raw pre-rescaling DGM coefficients locally. The bounded
 true-LP reconstruction audit passed the Spearman >= 0.999 criterion for all

@@ -162,6 +162,7 @@ class Config:
     rerun_failed: bool = False
     max_new_model_fits: Optional[int] = None
     log_existing_skips: bool = False
+    models: Optional[List[str]] = None
 
 
 def parse_args() -> Config:
@@ -188,6 +189,17 @@ def parse_args() -> Config:
         action="store_true",
         help="Print every scenario-replicate-model row skipped by checkpoint resume.",
     )
+    parser.add_argument(
+        "--models",
+        type=str,
+        default="",
+        help="Comma-separated subset of model names to run. Existing completed rows are still reused.",
+    )
+    parser.add_argument(
+        "--only-deep",
+        action="store_true",
+        help="Run only the optional DeepSurv and DeepHit models.",
+    )
     args = parser.parse_args()
     if args.debug and args.full:
         parser.error("Use either --debug or --full, not both.")
@@ -205,6 +217,15 @@ def parse_args() -> Config:
         if not args.full:
             debug_mode = True
 
+    model_subset = None
+    if args.only_deep:
+        model_subset = list(OPTIONAL_DEEP_MODELS)
+    elif args.models.strip():
+        model_subset = [item.strip() for item in args.models.split(",") if item.strip()]
+        unknown = sorted(set(model_subset) - set(ALL_MODELS))
+        if unknown:
+            parser.error("Unknown model(s): " + ", ".join(unknown))
+
     return Config(
         data_dir=args.data_dir,
         c2_dir=args.c2_dir,
@@ -218,6 +239,7 @@ def parse_args() -> Config:
         rerun_failed=args.rerun_failed,
         max_new_model_fits=args.max_new_model_fits,
         log_existing_skips=args.log_existing_skips,
+        models=model_subset,
     )
 
 
@@ -237,11 +259,16 @@ def run_metadata(config: Config) -> Dict[str, Any]:
         "random_seed": int(config.random_seed),
         "max_reps_per_scenario": "" if config.max_reps_per_scenario is None else int(config.max_reps_per_scenario),
         "max_new_model_fits": "" if config.max_new_model_fits is None else int(config.max_new_model_fits),
+        "model_filter": ";".join(selected_models(config)),
     }
 
 
 def is_publication_full_run(config: Config) -> bool:
     return (not config.debug_mode) and config.max_reps_per_scenario is None
+
+
+def selected_models(config: Config) -> List[str]:
+    return list(config.models) if config.models else list(ALL_MODELS)
 
 
 def make_output_dirs(config: Config) -> Dict[str, Path]:
@@ -428,39 +455,53 @@ def parse_safe_bool(x: Any) -> bool:
 
 
 def load_predictor_lists(config: Config, paths: Dict[str, Path]) -> Tuple[List[str], List[str], pd.DataFrame]:
-    all_safe = read_predictor_list(config.c3_dir / "tables" / "predictor_list_all_safe_C3.csv")
-    dgm = read_predictor_list(config.c3_dir / "tables" / "predictor_list_dgm_features_C3.csv")
+    all_safe_raw = read_predictor_list(config.c3_dir / "tables" / "predictor_list_all_safe_C3.csv")
+    dgm_raw = read_predictor_list(config.c3_dir / "tables" / "predictor_list_dgm_features_C3.csv")
     source_all = "C3"
     source_dgm = "C3"
-    if not all_safe:
-        all_safe = read_predictor_list(config.c2_dir / "tables" / "predictor_list_all_safe.csv")
+    if not all_safe_raw:
+        all_safe_raw = read_predictor_list(config.c2_dir / "tables" / "predictor_list_all_safe.csv")
         source_all = "C2"
-    if not dgm:
-        dgm = read_predictor_list(config.c2_dir / "tables" / "predictor_list_dgm_features.csv")
+    if not dgm_raw:
+        dgm_raw = read_predictor_list(config.c2_dir / "tables" / "predictor_list_dgm_features.csv")
         source_dgm = "C2"
 
     rows = []
-    for predictor_set, predictors, source in [("all_safe", all_safe, source_all), ("dgm", dgm, source_dgm)]:
+    for predictor_set, predictors, source in [("all_safe", all_safe_raw, source_all), ("dgm", dgm_raw, source_dgm)]:
         for predictor in predictors:
+            forbidden = has_forbidden_name(predictor)
             rows.append(
                 {
                     "predictor_set": predictor_set,
                     "predictor": predictor,
                     "source": source,
-                    "forbidden_name_flag": has_forbidden_name(predictor),
+                    "forbidden_name_flag": forbidden,
+                    "included_after_C4_filter": not forbidden,
                 }
             )
     audit = pd.DataFrame(rows)
     if audit.empty:
         raise RuntimeError("No predictor lists found from C2 or C3 outputs.")
     audit.to_csv(paths["tables"] / "predictor_audit_C4.csv", index=False)
-    leakage = audit.loc[audit["forbidden_name_flag"]].copy()
+    excluded = audit.loc[audit["forbidden_name_flag"]].copy()
+    excluded.to_csv(paths["tables"] / "predictor_exclusion_audit_C4.csv", index=False)
+
+    all_safe = [p for p in all_safe_raw if not has_forbidden_name(p)]
+    dgm = [p for p in dgm_raw if not has_forbidden_name(p)]
+    final_rows = [
+        {"predictor_set": "all_safe", "predictor": p, "forbidden_name_flag": has_forbidden_name(p)}
+        for p in all_safe
+    ] + [
+        {"predictor_set": "dgm", "predictor": p, "forbidden_name_flag": has_forbidden_name(p)}
+        for p in dgm
+    ]
+    final_audit = pd.DataFrame(final_rows)
+    leakage = final_audit.loc[final_audit["forbidden_name_flag"]].copy() if not final_audit.empty else pd.DataFrame()
     leakage.to_csv(paths["tables"] / "predictor_leakage_audit_C4.csv", index=False)
+    if all_safe == [] or dgm == []:
+        raise RuntimeError("C4 predictor filtering removed all predictors from at least one predictor set.")
     if not leakage.empty:
-        raise RuntimeError(
-            "Forbidden predictor names detected in C4 predictor lists: "
-            + ", ".join(leakage["predictor"].astype(str).tolist())
-        )
+        raise RuntimeError("Forbidden predictor names remain after C4 filtering: " + ", ".join(leakage["predictor"].astype(str).tolist()))
     pd.DataFrame({"predictor": dgm}).to_csv(paths["tables"] / "predictor_list_dgm_C4.csv", index=False)
     pd.DataFrame({"predictor": all_safe}).to_csv(paths["tables"] / "predictor_list_all_safe_C4.csv", index=False)
     return dgm, all_safe, audit
@@ -543,6 +584,30 @@ def append_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
             existing_cols = all_cols
         df = df.reindex(columns=existing_cols)
     df.to_csv(path, mode="a", header=write_header, index=False)
+
+
+def prune_rerun_rows(path: Path, config: Config, models_to_run: Sequence[str]) -> None:
+    """Remove stale failed/skipped checkpoint rows for selected models before rerun."""
+
+    if not config.rerun_failed or not path.exists():
+        return
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return
+    if df.empty or "run_mode" not in df.columns:
+        return
+    model_set = set(models_to_run)
+    mode = run_mode_label(config)
+    stale = (
+        (df["run_mode"].astype(str) == mode)
+        & (df["model"].astype(str).isin(model_set))
+        & ((df["failed"] == True) | (df["skipped"] == True))  # noqa: E712
+    )
+    if stale.any():
+        removed = int(stale.sum())
+        df.loc[~stale].to_csv(path, index=False)
+        print(f"Removed {removed} stale failed/skipped rows for selected rerun models.", flush=True)
 
 
 def split_train_test(df: pd.DataFrame, config: Config, replicate_id: int):
@@ -1037,6 +1102,329 @@ def fit_sksurv_pair_risk5(
     return pred, risk_score, feature_names, used_predictors, warnings_out
 
 
+def torch_training_params(config: Config) -> Tuple[int, int, int]:
+    if config.debug_mode:
+        return 8, 256, 16
+    return 20, 256, 32
+
+
+def set_torch_seed(seed: int) -> None:
+    import torch
+
+    torch.manual_seed(int(seed))
+    try:
+        torch.set_num_threads(max(1, min(4, os.cpu_count() or 1)))
+    except Exception:
+        pass
+
+
+def torch_hidden_layers(in_features: int) -> List[int]:
+    return [min(64, max(8, in_features * 2)), 16] if in_features < 64 else [64, 32]
+
+
+def build_torch_mlp(in_features: int, out_features: int, hidden: Sequence[int], dropout: float = 0.10):
+    import torch
+
+    layers: List[Any] = []
+    prev = int(in_features)
+    for width in hidden:
+        layers.append(torch.nn.Linear(prev, int(width)))
+        layers.append(torch.nn.ReLU())
+        layers.append(torch.nn.Dropout(float(dropout)))
+        prev = int(width)
+    layers.append(torch.nn.Linear(prev, int(out_features)))
+    return torch.nn.Sequential(*layers)
+
+
+def cox_partial_loglik_loss(log_risk, durations, events):  # type: ignore[no-untyped-def]
+    import torch
+
+    log_risk = log_risk.reshape(-1)
+    order = torch.argsort(durations.reshape(-1), descending=True)
+    log_risk = log_risk[order]
+    events = events.reshape(-1)[order]
+    log_cumsum = torch.logcumsumexp(log_risk, dim=0)
+    loss_terms = (log_risk - log_cumsum) * events
+    return -loss_terms.sum() / events.sum().clamp_min(1.0)
+
+
+def breslow_baseline_cumulative_hazard(durations: np.ndarray, events: np.ndarray, log_risk: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    durations = np.asarray(durations, dtype=float)
+    events = np.asarray(events, dtype=bool)
+    risk = np.exp(np.clip(np.asarray(log_risk, dtype=float), -20.0, 20.0))
+    event_times = np.sort(np.unique(durations[events]))
+    cumhaz = []
+    total = 0.0
+    for time_point in event_times:
+        d_j = float(np.sum(events & (durations == time_point)))
+        denom = float(np.sum(risk[durations >= time_point]))
+        if denom <= 0 or not np.isfinite(denom):
+            continue
+        total += d_j / denom
+        cumhaz.append(total)
+    return event_times[: len(cumhaz)], np.asarray(cumhaz, dtype=float)
+
+
+def init_numpy_mlp(rng: np.random.Generator, n_features: int, n_hidden: int, n_outputs: int) -> Dict[str, np.ndarray]:
+    scale1 = math.sqrt(2.0 / max(n_features, 1))
+    scale2 = math.sqrt(2.0 / max(n_hidden, 1))
+    return {
+        "w1": rng.normal(0.0, scale1, size=(n_features, n_hidden)).astype(float),
+        "b1": np.zeros(n_hidden, dtype=float),
+        "w2": rng.normal(0.0, scale2, size=(n_hidden, n_outputs)).astype(float),
+        "b2": np.zeros(n_outputs, dtype=float),
+    }
+
+
+def numpy_mlp_forward(params: Dict[str, np.ndarray], x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    z1 = x @ params["w1"] + params["b1"]
+    h1 = np.maximum(z1, 0.0)
+    out = h1 @ params["w2"] + params["b2"]
+    return h1, out
+
+
+def adam_update(
+    params: Dict[str, np.ndarray],
+    grads: Dict[str, np.ndarray],
+    state: Dict[str, Dict[str, np.ndarray]],
+    step: int,
+    lr: float,
+) -> None:
+    beta1 = 0.9
+    beta2 = 0.999
+    eps = 1e-8
+    for name, grad in grads.items():
+        grad = np.clip(np.asarray(grad, dtype=float), -5.0, 5.0)
+        state["m"][name] = beta1 * state["m"][name] + (1.0 - beta1) * grad
+        state["v"][name] = beta2 * state["v"][name] + (1.0 - beta2) * (grad**2)
+        m_hat = state["m"][name] / (1.0 - beta1**step)
+        v_hat = state["v"][name] / (1.0 - beta2**step)
+        params[name] -= lr * m_hat / (np.sqrt(v_hat) + eps)
+
+
+def init_adam_state(params: Dict[str, np.ndarray]) -> Dict[str, Dict[str, np.ndarray]]:
+    return {
+        "m": {name: np.zeros_like(value) for name, value in params.items()},
+        "v": {name: np.zeros_like(value) for name, value in params.items()},
+    }
+
+
+def cox_loss_and_gradient(log_risk: np.ndarray, durations: np.ndarray, events: np.ndarray) -> Tuple[float, np.ndarray]:
+    eta = np.asarray(log_risk, dtype=float).reshape(-1)
+    durations = np.asarray(durations, dtype=float).reshape(-1)
+    events = np.asarray(events, dtype=float).reshape(-1)
+    n_events = float(events.sum())
+    if n_events <= 0:
+        raise ValueError("Cox loss requires at least one event.")
+    order = np.argsort(-durations)
+    eta_s = eta[order]
+    events_s = events[order]
+    exp_eta = np.exp(np.clip(eta_s, -20.0, 20.0))
+    denom = np.cumsum(exp_eta)
+    log_denom = np.log(np.clip(denom, 1e-12, np.inf))
+    loss = -float(np.sum(events_s * (eta_s - log_denom)) / n_events)
+    contrib = events_s / np.clip(denom, 1e-12, np.inf)
+    suffix_contrib = np.cumsum(contrib[::-1])[::-1]
+    grad_s = (-events_s + exp_eta * suffix_contrib) / n_events
+    grad = np.empty_like(grad_s)
+    grad[order] = grad_s
+    return loss, grad.reshape(-1, 1)
+
+
+def softmax_stable(logits: np.ndarray) -> np.ndarray:
+    shifted = logits - np.max(logits, axis=1, keepdims=True)
+    exp = np.exp(np.clip(shifted, -50.0, 50.0))
+    return exp / np.clip(exp.sum(axis=1, keepdims=True), 1e-12, np.inf)
+
+
+def cumulative_hazard_from_surv_df(surv_df: pd.DataFrame) -> pd.DataFrame:
+    values = np.asarray(surv_df.to_numpy(dtype=float), dtype=float)
+    values = np.clip(values, 1e-8, 1.0)
+    return pd.DataFrame(-np.log(values), index=surv_df.index, columns=surv_df.columns)
+
+
+def step_dataframe_values(df: pd.DataFrame, grid: np.ndarray, default: float = 0.0) -> np.ndarray:
+    times = df.index.to_numpy(dtype=float)
+    values = np.asarray(df.to_numpy(dtype=float), dtype=float)
+    out = np.full((len(grid), values.shape[1]), default, dtype=float)
+    if len(times) == 0:
+        return out
+    idx = np.searchsorted(times, grid, side="right") - 1
+    mask = idx >= 0
+    out[mask, :] = values[idx[mask], :]
+    return out
+
+
+def cif_from_two_cumulative_hazard_dfs(
+    ch1: pd.DataFrame,
+    ch2: pd.DataFrame,
+    horizon: float,
+) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+    warnings_out: List[str] = []
+    t1 = ch1.index.to_numpy(dtype=float)
+    t2 = ch2.index.to_numpy(dtype=float)
+    grid = np.unique(np.concatenate([t1[(t1 > 0) & (t1 <= horizon)], t2[(t2 > 0) & (t2 <= horizon)], [float(horizon)]]))
+    if grid.size == 0:
+        n = ch1.shape[1]
+        return np.zeros(n, dtype=float), np.zeros(n, dtype=float), ["empty_deepsurv_time_grid"]
+    h1 = step_dataframe_values(ch1, grid, default=0.0)
+    h2 = step_dataframe_values(ch2, grid, default=0.0)
+    h1_prev = np.vstack([np.zeros((1, h1.shape[1])), h1[:-1, :]])
+    h2_prev = np.vstack([np.zeros((1, h2.shape[1])), h2[:-1, :]])
+    dh1 = np.maximum(h1 - h1_prev, 0.0)
+    surv_prev = np.exp(-h1_prev - h2_prev)
+    pred = np.sum(surv_prev * dh1, axis=0)
+    risk_score = step_dataframe_values(ch1, np.asarray([horizon], dtype=float), default=0.0).reshape(-1)
+    if np.isnan(pred).any():
+        warnings_out.append("nan_deepsurv_cif_values_present")
+    return np.clip(pred, 0.0, 1.0), risk_score, warnings_out
+
+
+def fit_one_deepsurv_cause(
+    x_train: np.ndarray,
+    x_test: np.ndarray,
+    durations: np.ndarray,
+    events: np.ndarray,
+    seed: int,
+    config: Config,
+) -> pd.DataFrame:
+    epochs, _, _ = torch_training_params(config)
+    in_features = int(x_train.shape[1])
+    n_hidden = min(64, max(8, in_features * 2))
+    rng = np.random.default_rng(seed)
+    params = init_numpy_mlp(rng, in_features, n_hidden, 1)
+    state = init_adam_state(params)
+    x = np.asarray(x_train, dtype=float)
+    lr = 0.01 if config.debug_mode else 0.005
+    for step in range(1, epochs * 10 + 1):
+        h1, log_risk = numpy_mlp_forward(params, x)
+        loss, grad_eta = cox_loss_and_gradient(log_risk.reshape(-1), durations, events)
+        if not np.isfinite(loss):
+            raise ValueError("DeepSurv Cox loss became non-finite.")
+        grad_w2 = h1.T @ grad_eta + 1e-4 * params["w2"]
+        grad_b2 = grad_eta.sum(axis=0)
+        grad_h = grad_eta @ params["w2"].T
+        grad_z = grad_h * (h1 > 0)
+        grads = {
+            "w1": x.T @ grad_z + 1e-4 * params["w1"],
+            "b1": grad_z.sum(axis=0),
+            "w2": grad_w2,
+            "b2": grad_b2,
+        }
+        adam_update(params, grads, state, step, lr=lr)
+    _, train_log_risk_arr = numpy_mlp_forward(params, x)
+    _, test_log_risk_arr = numpy_mlp_forward(params, np.asarray(x_test, dtype=float))
+    train_log_risk = train_log_risk_arr.reshape(-1)
+    test_log_risk = test_log_risk_arr.reshape(-1)
+    base_times, base_cumhaz = breslow_baseline_cumulative_hazard(durations, events, train_log_risk)
+    if len(base_times) == 0:
+        raise ValueError("DeepSurv baseline cumulative hazard has no event times.")
+    ch = np.outer(base_cumhaz, np.exp(np.clip(test_log_risk, -20.0, 20.0)))
+    return pd.DataFrame(ch, index=base_times, columns=np.arange(x_test.shape[0]))
+
+
+def fit_deepsurv_pair_risk5(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    predictors: Sequence[str],
+    config: Config,
+) -> Tuple[np.ndarray, np.ndarray, List[str], List[str], List[str]]:
+    x_train, x_test, feature_names, used_predictors = fit_transform_features(train_df, test_df, predictors)
+    if x_train.shape[1] == 0:
+        raise ValueError("DeepSurv received zero usable features.")
+    durations = train_df[DURATION_COL].astype(float).to_numpy(dtype="float32")
+    status = train_df[STATUS_COL].astype(int).to_numpy()
+    seed = config.random_seed + int(train_df["replicate_id"].iloc[0])
+    if (status == EVENT1_STATUS).sum() == 0:
+        raise ValueError("DeepSurv event1 model has no training events.")
+    if (status == EVENT2_STATUS).sum() == 0:
+        raise ValueError("DeepSurv event2 model has no training events.")
+    ch1 = fit_one_deepsurv_cause(x_train, x_test, durations, (status == EVENT1_STATUS).astype(float), seed, config)
+    ch2 = fit_one_deepsurv_cause(x_train, x_test, durations, (status == EVENT2_STATUS).astype(float), seed + 1009, config)
+    pred, risk_score, warnings_out = cif_from_two_cumulative_hazard_dfs(ch1, ch2, config.horizon_years)
+    return pred, risk_score, feature_names, used_predictors, warnings_out
+
+
+def fit_deephit_risk5(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    predictors: Sequence[str],
+    config: Config,
+) -> Tuple[np.ndarray, np.ndarray, List[str], List[str], List[str]]:
+    x_train, x_test, feature_names, used_predictors = fit_transform_features(train_df, test_df, predictors)
+    if x_train.shape[1] == 0:
+        raise ValueError("DeepHit received zero usable features.")
+    seed = config.random_seed + int(train_df["replicate_id"].iloc[0])
+    epochs, _, num_durations = torch_training_params(config)
+
+    durations = train_df[DURATION_COL].astype(float).to_numpy(dtype="float32")
+    events = train_df[STATUS_COL].astype(int).to_numpy(dtype="int64")
+    if not set(np.unique(events)).issubset({0, EVENT1_STATUS, EVENT2_STATUS}):
+        raise ValueError("DeepHit received unsupported competing-risk status values.")
+    if (events == EVENT1_STATUS).sum() == 0:
+        raise ValueError("DeepHit has no event1 training events.")
+    max_time = float(max(np.nanmax(durations), config.horizon_years))
+    cuts = np.linspace(0.0, max_time, num_durations, dtype="float32")
+    idx_durations = np.searchsorted(cuts, durations, side="right") - 1
+    idx_durations = np.clip(idx_durations, 0, num_durations - 1).astype("int64")
+    n_risks = 2
+    in_features = int(x_train.shape[1])
+    n_hidden = min(64, max(8, in_features * 2))
+    n_outputs = n_risks * num_durations + 1
+    rng = np.random.default_rng(seed)
+    params = init_numpy_mlp(rng, in_features, n_hidden, n_outputs)
+    state = init_adam_state(params)
+    x = np.asarray(x_train, dtype=float)
+    row = np.arange(len(x))
+    lr = 0.01 if config.debug_mode else 0.005
+    for step in range(1, epochs * 10 + 1):
+        h1, logits = numpy_mlp_forward(params, x)
+        probs = softmax_stable(logits)
+        grad_logits = probs.copy()
+        is_event = events > 0
+        event_rows = row[is_event]
+        if event_rows.size:
+            event_class = (events[is_event] - 1) * num_durations + idx_durations[is_event]
+            grad_logits[event_rows, event_class] -= 1.0
+        cens_rows = row[~is_event]
+        if cens_rows.size:
+            allowed = np.zeros_like(probs[cens_rows])
+            for local_i, sample_i in enumerate(cens_rows):
+                idx = idx_durations[sample_i]
+                allowed[local_i, (idx + 1) : num_durations] = 1.0
+                allowed[local_i, (num_durations + idx + 1) : (2 * num_durations)] = 1.0
+                allowed[local_i, -1] = 1.0
+            surv_prob = np.sum(probs[cens_rows] * allowed, axis=1, keepdims=True)
+            grad_logits[cens_rows] -= allowed * probs[cens_rows] / np.clip(surv_prob, 1e-8, np.inf)
+        grad_logits /= max(len(x), 1)
+        grad_w2 = h1.T @ grad_logits + 1e-4 * params["w2"]
+        grad_b2 = grad_logits.sum(axis=0)
+        grad_h = grad_logits @ params["w2"].T
+        grad_z = grad_h * (h1 > 0)
+        grads = {
+            "w1": x.T @ grad_z + 1e-4 * params["w1"],
+            "b1": grad_z.sum(axis=0),
+            "w2": grad_w2,
+            "b2": grad_b2,
+        }
+        adam_update(params, grads, state, step, lr=lr)
+
+    _, logits_test = numpy_mlp_forward(params, np.asarray(x_test, dtype=float))
+    probs_test = softmax_stable(logits_test)[:, :-1].reshape(len(x_test), n_risks, num_durations)
+    cif = probs_test.cumsum(axis=2)
+    idx = int(np.searchsorted(cuts, config.horizon_years, side="right") - 1)
+    warnings_out: List[str] = []
+    if idx < 0:
+        idx = 0
+        warnings_out.append("deephit_horizon_before_first_cut")
+    if idx >= len(cuts):
+        idx = len(cuts) - 1
+        warnings_out.append("deephit_horizon_after_last_cut")
+    pred = np.asarray(cif[:, 0, idx], dtype=float)
+    pred = np.clip(pred, 0.0, 1.0)
+    return pred, pred.copy(), feature_names, used_predictors, warnings_out
+
+
 def run_model(
     model: str,
     scenario_id: str,
@@ -1051,19 +1439,6 @@ def run_model(
     start = time.perf_counter()
     reduced_record = None
     try:
-        if model in OPTIONAL_DEEP_MODELS:
-            if model.startswith("deepsurv"):
-                needed = ["torch", "torchtuples", "pycox"]
-                missing = [name for name in needed if not dependency_available(dep, name)]
-                reason = "missing_optional_deep_dependencies:" + ",".join(missing) if missing else "optional_deep_model_not_enabled_in_C4_main"
-            else:
-                needed = ["torch", "torchtuples", "pycox"]
-                missing = [name for name in needed if not dependency_available(dep, name)]
-                reason = "missing_optional_deephit_dependencies:" + ",".join(missing) if missing else "optional_deephit_not_enabled_in_C4_main"
-            row = skipped_result(scenario_id, replicate_id, model, train_df, test_df, reason)
-            row["runtime_sec"] = time.perf_counter() - start
-            return row, None, None, None
-
         pred_risk5: Optional[np.ndarray] = None
         risk_score: Optional[np.ndarray] = None
         feature_names: List[str] = []
@@ -1100,6 +1475,37 @@ def run_model(
             predictors = dgm_predictors if model in {MODEL_RSF_DGM, MODEL_GBSA_DGM} else all_safe_predictors
             pred_risk5, risk_score, feature_names, used_predictors, prediction_warnings = fit_sksurv_pair_risk5(
                 model, train_df, test_df, predictors, config
+            )
+        elif model in {MODEL_DEEPSURV_DGM, MODEL_DEEPSURV_SAFE}:
+            needed: List[str] = []
+            missing = [name for name in needed if not dependency_available(dep, name)]
+            if missing:
+                row = skipped_result(scenario_id, replicate_id, model, train_df, test_df, "missing_optional_deep_dependencies:" + ",".join(missing))
+                row["runtime_sec"] = time.perf_counter() - start
+                return row, None, None, None
+            predictors = dgm_predictors if model == MODEL_DEEPSURV_DGM else all_safe_predictors
+            pred_risk5, risk_score, feature_names, used_predictors, prediction_warnings = fit_deepsurv_pair_risk5(
+                train_df, test_df, predictors, config
+            )
+        elif model in {MODEL_DEEPHIT_DGM, MODEL_DEEPHIT_SAFE_REDUCED}:
+            needed = []
+            missing = [name for name in needed if not dependency_available(dep, name)]
+            if missing:
+                row = skipped_result(scenario_id, replicate_id, model, train_df, test_df, "missing_optional_deephit_dependencies:" + ",".join(missing))
+                row["runtime_sec"] = time.perf_counter() - start
+                return row, None, None, None
+            predictors = list(dgm_predictors)
+            if model == MODEL_DEEPHIT_SAFE_REDUCED:
+                predictors = select_reduced_predictors_train_only(train_df, all_safe_predictors, max_features=30, horizon=config.horizon_years)
+                reduced_record = {
+                    "scenario_id": scenario_id,
+                    "replicate_id": int(replicate_id),
+                    "model": model,
+                    "n_selected": len(predictors),
+                    "selected_predictors": ";".join(predictors),
+                }
+            pred_risk5, risk_score, feature_names, used_predictors, prediction_warnings = fit_deephit_risk5(
+                train_df, test_df, predictors, config
             )
         else:
             row = skipped_result(scenario_id, replicate_id, model, train_df, test_df, "model_not_enabled_in_C4_v1")
@@ -1584,6 +1990,7 @@ def full_run_sanity_checks(
     finegray_completed = MODEL_FINEGRAY_DGM in successful_models
     rsf_completed = any(m in successful_models for m in [MODEL_RSF_DGM, MODEL_RSF_SAFE])
     gbsa_completed = any(m in successful_models for m in [MODEL_GBSA_DGM, MODEL_GBSA_SAFE])
+    deepsurv_completed = any(m in successful_models for m in [MODEL_DEEPSURV_DGM, MODEL_DEEPSURV_SAFE])
     deephit_completed = any(m in successful_models for m in [MODEL_DEEPHIT_DGM, MODEL_DEEPHIT_SAFE_REDUCED])
     oracle_sanity_passed = bool(oracle_audit.empty or not oracle_audit["needs_audit"].fillna(False).astype(bool).any())
     leakage_path = paths["tables"] / "predictor_leakage_audit_C4.csv"
@@ -1617,6 +2024,7 @@ def full_run_sanity_checks(
         ("finegray_completed", True, finegray_completed, finegray_completed),
         ("rsf_completed", True, rsf_completed, rsf_completed),
         ("gbsa_completed", True, gbsa_completed, gbsa_completed),
+        ("deepsurv_completed", "optional", deepsurv_completed, True),
         ("deephit_completed", "optional", deephit_completed, True),
         ("full_run_passed", True, full_run_passed, full_run_passed),
         ("publication_ready", True, publication_ready, publication_ready),
@@ -1662,6 +2070,7 @@ def write_readme(
     finegray_status = "completed" if MODEL_FINEGRAY_DGM in successful_models else "not completed"
     rsf_status = "completed" if any(m in successful_models for m in [MODEL_RSF_DGM, MODEL_RSF_SAFE]) else "not completed"
     gbsa_status = "completed" if any(m in successful_models for m in [MODEL_GBSA_DGM, MODEL_GBSA_SAFE]) else "not completed"
+    deepsurv_status = "completed" if any(m in successful_models for m in [MODEL_DEEPSURV_DGM, MODEL_DEEPSURV_SAFE]) else "skipped/not completed"
     deephit_status = "completed" if any(m in successful_models for m in [MODEL_DEEPHIT_DGM, MODEL_DEEPHIT_SAFE_REDUCED]) else "skipped/not completed"
     any_oracle_flag = bool(not oracle_audit.empty and oracle_audit["needs_audit"].fillna(False).astype(bool).any())
     combined_path = paths["tables"] / "combined_C2_C3_C4_model_summary.csv"
@@ -1736,7 +2145,7 @@ def write_readme(
         "",
         "## Aim",
         "",
-        "C4 extends the completed C2/C3 analyses by adding Fine-Gray, Random Survival Forest, and Gradient Boosting Survival models. It does not regenerate Step C data and does not rerun the original C2/C3 models.",
+        "C4 extends the completed C2/C3 analyses by adding Fine-Gray, Random Survival Forest, Gradient Boosting Survival, and optional deep survival models when dependencies are available. It does not regenerate Step C data and does not rerun the original C2/C3 models.",
         "",
         "## Run Status",
         "",
@@ -1762,7 +2171,8 @@ def write_readme(
         "- Fine-Gray: `finegray_dgm_cif_R`, `finegray_all_safe_reduced_R`.",
         "- Random Survival Forest: `cs_rsf_dgm_cif`, `cs_rsf_all_safe_cif`.",
         "- Gradient Boosting Survival: `cs_gbsa_dgm_cif`, `cs_gbsa_all_safe_cif`.",
-        "- Optional deep models: DeepSurv and DeepHit are logged as skipped if dependencies are unavailable.",
+        "- DeepSurv: `deepsurv_dgm_cause_specific_optional`, `deepsurv_all_safe_cause_specific_optional`.",
+        "- DeepHit: `deephit_competing_risk_dgm_optional`, `deephit_competing_risk_all_safe_reduced_optional`.",
         "",
         "## Dependency Status",
         "",
@@ -1773,6 +2183,7 @@ def write_readme(
         f"- Fine-Gray status: {finegray_status}.",
         f"- RSF status: {rsf_status}.",
         f"- GBSA status: {gbsa_status}.",
+        f"- DeepSurv status: {deepsurv_status}.",
         f"- DeepHit status: {deephit_status}.",
         f"- Any oracle sanity flag: {any_oracle_flag}.",
         f"- Oracle/audit flag details: {flag_note}.",
@@ -1847,6 +2258,8 @@ def process_all(config: Config, paths: Dict[str, Path], dep: pd.DataFrame, dgm_p
     reduced_path = paths["tables"] / "predictor_list_all_safe_reduced_C4_by_replicate.csv"
     pred_sample_path = paths["predictions"] / "debug_prediction_sample_C4.csv"
     cal_path = paths["tables"] / "calibration_deciles_replicate_level_C4.csv"
+    models_to_run = selected_models(config)
+    prune_rerun_rows(perf_path, config, models_to_run)
     existing = get_existing_successes(perf_path, config)
     metadata = run_metadata(config)
     new_rows_written = 0
@@ -1863,10 +2276,10 @@ def process_all(config: Config, paths: Dict[str, Path], dep: pd.DataFrame, dgm_p
         for replicate_id in reps:
             existing_models = {
                 model
-                for model in ALL_MODELS
+                for model in models_to_run
                 if (scenario_id, int(replicate_id), model) in existing
             }
-            if len(existing_models) == len(ALL_MODELS):
+            if len(existing_models) == len(models_to_run):
                 complete_existing_reps += 1
                 if config.log_existing_skips:
                     print(f"  replicate {replicate_id}: skip complete existing replicate", flush=True)
@@ -1874,7 +2287,7 @@ def process_all(config: Config, paths: Dict[str, Path], dep: pd.DataFrame, dgm_p
             rep_df = scenario_df.loc[scenario_df["replicate_id"].astype(int) == int(replicate_id)].copy()
             train_df, test_df = split_train_test(rep_df, config, int(replicate_id))
             print(f"  replicate {replicate_id}: train={len(train_df)} test={len(test_df)}", flush=True)
-            for model in ALL_MODELS:
+            for model in models_to_run:
                 key = (scenario_id, int(replicate_id), model)
                 if key in existing:
                     if config.log_existing_skips:
@@ -1986,6 +2399,14 @@ def rebuild_calibration_deciles(
                 elif model in {MODEL_RSF_DGM, MODEL_RSF_SAFE, MODEL_GBSA_DGM, MODEL_GBSA_SAFE}:
                     predictors = dgm_predictors if model in {MODEL_RSF_DGM, MODEL_GBSA_DGM} else all_safe_predictors
                     pred, _, _, _, _ = fit_sksurv_pair_risk5(model, train_df, test_df, predictors, config)
+                elif model in {MODEL_DEEPSURV_DGM, MODEL_DEEPSURV_SAFE}:
+                    predictors = dgm_predictors if model == MODEL_DEEPSURV_DGM else all_safe_predictors
+                    pred, _, _, _, _ = fit_deepsurv_pair_risk5(train_df, test_df, predictors, config)
+                elif model in {MODEL_DEEPHIT_DGM, MODEL_DEEPHIT_SAFE_REDUCED}:
+                    predictors = dgm_predictors
+                    if model == MODEL_DEEPHIT_SAFE_REDUCED:
+                        predictors = select_reduced_predictors_train_only(train_df, all_safe_predictors, max_features=30, horizon=config.horizon_years)
+                    pred, _, _, _, _ = fit_deephit_risk5(train_df, test_df, predictors, config)
                 else:
                     continue
                 dec = calibration_deciles_for_prediction(scenario_id, replicate_id, model, test_df, pred, config.horizon_years)
@@ -2017,6 +2438,7 @@ def main() -> None:
     print(f"MAX_REPS_PER_SCENARIO={config.max_reps_per_scenario}", flush=True)
     print(f"MAX_NEW_MODEL_FITS={config.max_new_model_fits}", flush=True)
     print(f"LOG_EXISTING_SKIPS={config.log_existing_skips}", flush=True)
+    print(f"MODELS_TO_RUN={','.join(selected_models(config))}", flush=True)
 
     validate_export_safety(config)
     dep = dependency_audit(paths)
