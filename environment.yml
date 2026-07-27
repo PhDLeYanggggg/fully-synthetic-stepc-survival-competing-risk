@@ -1,4 +1,4 @@
-name: slam-synthetic-institutionalisation
+name: synthetic-carehome-competing-risk
 channels:
   - conda-forge
 dependencies:
@@ -11,7 +11,15 @@ dependencies:
   - lifelines
   - xgboost
   - matplotlib
+  - pytorch
   - openpyxl
   - xlsxwriter
   - jupyter
   - pytest
+  - r-base
+  - r-survival
+  - r-cmprsk
+  - pip
+  - pip:
+      - pycox==0.3.0
+      - torchtuples==0.2.2

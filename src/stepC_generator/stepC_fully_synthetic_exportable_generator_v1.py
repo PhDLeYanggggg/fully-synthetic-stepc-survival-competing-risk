@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import warnings
 from dataclasses import dataclass, asdict
@@ -103,7 +104,14 @@ except Exception:
 class StepCConfig:
     # Internal SLAM-derived source used only for summary estimation.
     # This file should stay inside SLAM. It is NOT exported.
-    source_csv: str = "slam_inst_sim_v0/slam_baseline_simulated_survival_dataset_SAFE_IN_SLAM_ONLY.csv"
+    source_csv: str = os.environ.get("STEPC_INTERNAL_SOURCE_CSV", "")
+
+    # Source-derived summaries are internal audit material. They must never be
+    # written inside the exportable fully synthetic package.
+    internal_summary_dir: str = os.environ.get(
+        "STEPC_INTERNAL_AUDIT_DIR",
+        "stepC_internal_source_summary_DO_NOT_EXPORT",
+    )
 
     # Output folder contains only fully synthetic data + summary tables.
     out_dir: str = "fully_synthetic_stepC_v1"
@@ -266,8 +274,25 @@ SCENARIOS = [
 # =============================================================================
 
 def ensure_dirs(out_dir: Path) -> None:
-    for sub in ["scenario_datasets", "tables", "audit", "internal_summary"]:
+    for sub in ["scenario_datasets", "tables", "audit"]:
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
+
+
+def prepare_internal_audit_dir(
+    out_dir: Path,
+    internal_audit_dir: Path,
+) -> Path:
+    """Create an internal-only audit directory outside the export package."""
+
+    export_root = out_dir.resolve()
+    audit_root = internal_audit_dir.resolve()
+    if audit_root == export_root or export_root in audit_root.parents:
+        raise RuntimeError(
+            "The internal source-summary directory must be outside the "
+            "exportable Step C package."
+        )
+    audit_root.mkdir(parents=True, exist_ok=True)
+    return audit_root
 
 
 def to_numeric_series(df: pd.DataFrame, col: str) -> pd.Series:
@@ -467,6 +492,11 @@ def compress_float_cols(df: pd.DataFrame) -> pd.DataFrame:
 # =============================================================================
 
 def load_internal_source(cfg: StepCConfig) -> pd.DataFrame:
+    if not str(cfg.source_csv).strip():
+        raise FileNotFoundError(
+            "No internal summary source was configured. Set "
+            "STEPC_INTERNAL_SOURCE_CSV inside the authorised environment."
+        )
     path = Path(cfg.source_csv)
     if not path.exists():
         raise FileNotFoundError(
@@ -477,7 +507,11 @@ def load_internal_source(cfg: StepCConfig) -> pd.DataFrame:
     return df
 
 
-def infer_source_stats(df: pd.DataFrame, cfg: StepCConfig, out_dir: Path) -> Dict:
+def infer_source_stats(
+    df: pd.DataFrame,
+    cfg: StepCConfig,
+    internal_audit_dir: Path,
+) -> Dict:
     """Infer broad summaries from internal SLAM source without exporting patient rows."""
     stats: Dict = {}
 
@@ -643,11 +677,19 @@ def infer_source_stats(df: pd.DataFrame, cfg: StepCConfig, out_dir: Path) -> Dic
     for k, v in stats.items():
         if isinstance(v, (int, float, str)) or v is None:
             summary_flat.append({"item": k, "value": v})
-    pd.DataFrame(summary_flat).to_csv(out_dir / "internal_summary" / "source_scalar_summary_used.csv", index=False)
-    pd.DataFrame([{"block": k, "missing_rate_used": v} for k, v in stats["missing_rates"].items()]).to_csv(
-        out_dir / "internal_summary" / "source_block_missingness_used_capped.csv", index=False
+    pd.DataFrame(summary_flat).to_csv(
+        internal_audit_dir / "source_scalar_summary_used.csv",
+        index=False,
     )
-    with open(out_dir / "internal_summary" / "source_summary_used.json", "w", encoding="utf-8") as f:
+    pd.DataFrame([{"block": k, "missing_rate_used": v} for k, v in stats["missing_rates"].items()]).to_csv(
+        internal_audit_dir / "source_block_missingness_used_capped.csv",
+        index=False,
+    )
+    with open(
+        internal_audit_dir / "source_summary_used.json",
+        "w",
+        encoding="utf-8",
+    ) as f:
         json.dump(stats, f, indent=2)
 
     print("[source summary] Key rates:")
@@ -1316,6 +1358,10 @@ No real care-home entry date was available. Death-time distribution is informed 
 def run_stepC(cfg: StepCConfig = CFG) -> None:
     out_dir = Path(cfg.out_dir)
     ensure_dirs(out_dir)
+    internal_audit_dir = prepare_internal_audit_dir(
+        out_dir,
+        Path(cfg.internal_summary_dir),
+    )
 
     print("=" * 88)
     print("Step C v1 fully synthetic exportable data generator")
@@ -1323,7 +1369,7 @@ def run_stepC(cfg: StepCConfig = CFG) -> None:
     print(json.dumps(asdict(cfg), indent=2))
 
     source = load_internal_source(cfg)
-    stats = infer_source_stats(source, cfg, out_dir)
+    stats = infer_source_stats(source, cfg, internal_audit_dir)
 
     scenario_summary_rows = []
     rep_summary_rows = []
@@ -1452,399 +1498,3 @@ def run_stepC(cfg: StepCConfig = CFG) -> None:
 
 if __name__ == "__main__":
     run_stepC(CFG)
-
-
-# In[18]:
-
-
-# Run Step C
-run_stepC(CFG)
-
-
-# In[19]:
-
-
-# ============================================================
-
-# Step C v1 quick audit cell
-
-# 1) Print high-missing DGM_truth / other columns
-
-# 2) Print outcome gradients by true_lp_carehome quartile
-
-# ============================================================
-
-from pathlib import Path
-
-import numpy as np
-
-import pandas as pd
-
-BASE_DIR = Path("fully_synthetic_stepC_v1")
-
-SCENARIO_DIR = BASE_DIR / "scenario_datasets"
-
-TABLE_DIR = BASE_DIR / "tables"
-
-AUDIT_DIR = BASE_DIR / "audit"
-
-AUDIT_DIR.mkdir(parents=True, exist_ok=True)
-
-feature_dict_path = TABLE_DIR / "feature_dictionary.csv"
-
-assert SCENARIO_DIR.exists(), f"Missing scenario folder: {SCENARIO_DIR}"
-
-assert feature_dict_path.exists(), f"Missing feature dictionary: {feature_dict_path}"
-
-feature_dict = pd.read_csv(feature_dict_path)
-
-# Flexible column naming support
-
-col_name = "column" if "column" in feature_dict.columns else "feature_name"
-
-assert col_name in feature_dict.columns, "feature_dictionary must contain column or feature_name"
-
-assert "block" in feature_dict.columns, "feature_dictionary must contain block"
-
-feature_dict = feature_dict.rename(columns={col_name: "column"})
-
-if "role" not in feature_dict.columns:
-
-    feature_dict["role"] = ""
-
-scenario_files = sorted(SCENARIO_DIR.glob("*.csv.gz"))
-
-assert len(scenario_files) > 0, f"No .csv.gz scenario files found in {SCENARIO_DIR}"
-
-print("=" * 100)
-
-print("STEP C QUICK AUDIT")
-
-print("=" * 100)
-
-print(f"Scenario files found: {len(scenario_files)}")
-
-print(f"Base dir: {BASE_DIR.resolve()}")
-
-print()
-
-high_missing_rows = []
-
-gradient_rows = []
-
-for f in scenario_files:
-
-    scenario_id = f.stem.replace(".csv", "")
-
-    print(f"[reading] {scenario_id}")
-
-    df = pd.read_csv(f, low_memory=False)
-
-    # ------------------------------------------------------------
-
-    # 1. High-missing columns audit
-
-    # ------------------------------------------------------------
-
-    miss = (
-
-        df.isna()
-
-        .mean()
-
-        .rename("missing_rate")
-
-        .reset_index()
-
-        .rename(columns={"index": "column"})
-
-    )
-
-    miss = miss.merge(
-
-        feature_dict[["column", "block", "role"]],
-
-        on="column",
-
-        how="left"
-
-    )
-
-    miss["scenario_id"] = scenario_id
-
-    high = miss.loc[
-
-        miss["block"].isin(["DGM_truth", "other"])
-& (miss["missing_rate"] >= 0.50)
-
-    ].copy()
-
-    high_missing_rows.append(high)
-
-    # ------------------------------------------------------------
-
-    # 2. Risk-gradient sanity by true LP quartile
-
-    # ------------------------------------------------------------
-
-    required_cols = [
-
-        "true_lp_carehome",
-
-        "event_carehome",
-
-        "event_death_before_carehome",
-
-        "event_free_or_censored",
-
-        "death_after_carehome",
-
-        "duration_years",
-
-    ]
-
-    missing_required = [c for c in required_cols if c not in df.columns]
-
-    if missing_required:
-
-        raise KeyError(f"{scenario_id} missing required columns: {missing_required}")
-
-    tmp = df[required_cols + [
-
-        c for c in ["true_risk_carehome_5y_observable_approx", "any_death_5y"]
-
-        if c in df.columns
-
-    ]].copy()
-
-    tmp["lp_quartile"] = pd.qcut(
-
-        tmp["true_lp_carehome"],
-
-        q=4,
-
-        labels=["Q1_lowest_LP", "Q2", "Q3", "Q4_highest_LP"],
-
-        duplicates="drop"
-
-    )
-
-    g = (
-
-        tmp
-
-        .groupby("lp_quartile", observed=False)
-
-        .agg(
-
-            n=("event_carehome", "size"),
-
-            mean_true_lp=("true_lp_carehome", "mean"),
-
-            carehome_rate=("event_carehome", "mean"),
-
-            death_before_carehome_rate=("event_death_before_carehome", "mean"),
-
-            event_free_or_censored_rate=("event_free_or_censored", "mean"),
-
-            death_after_carehome_rate=("death_after_carehome", "mean"),
-
-            median_duration_years=("duration_years", "median"),
-
-        )
-
-        .reset_index()
-
-    )
-
-    if "true_risk_carehome_5y_observable_approx" in tmp.columns:
-
-        g["mean_true_risk_carehome_5y_observable_approx"] = (
-
-            tmp
-
-            .groupby("lp_quartile", observed=False)["true_risk_carehome_5y_observable_approx"]
-
-            .mean()
-
-            .values
-
-        )
-
-    if "any_death_5y" in tmp.columns:
-
-        g["any_death_5y_rate"] = (
-
-            tmp
-
-            .groupby("lp_quartile", observed=False)["any_death_5y"]
-
-            .mean()
-
-            .values
-
-        )
-
-    g.insert(0, "scenario_id", scenario_id)
-
-    gradient_rows.append(g)
-
-high_missing_table = (
-
-    pd.concat(high_missing_rows, ignore_index=True)
-
-    if len(high_missing_rows) > 0
-
-    else pd.DataFrame()
-
-)
-
-gradient_table = pd.concat(gradient_rows, ignore_index=True)
-
-# Save outputs
-
-high_missing_out = AUDIT_DIR / "quick_audit_high_missing_DGM_truth_other_columns.csv"
-
-gradient_out = AUDIT_DIR / "quick_audit_true_lp_quartile_outcome_gradient.csv"
-
-high_missing_table.to_csv(high_missing_out, index=False)
-
-gradient_table.to_csv(gradient_out, index=False)
-
-# ------------------------------------------------------------
-
-# Print high missing columns
-
-# ------------------------------------------------------------
-
-print("\n" + "=" * 100)
-
-print("1) HIGH-MISSING COLUMNS IN DGM_truth / other")
-
-print("=" * 100)
-
-if high_missing_table.empty:
-
-    print("No DGM_truth / other columns with missing_rate >= 50%.")
-
-else:
-
-    show_high = (
-
-        high_missing_table
-
-        .sort_values(["scenario_id", "missing_rate"], ascending=[True, False])
-
-        [["scenario_id", "column", "block", "role", "missing_rate"]]
-
-    )
-
-    print(show_high.to_string(index=False))
-
-print(f"\nSaved high-missing audit to:\n{high_missing_out}")
-
-# ------------------------------------------------------------
-
-# Print true LP quartile gradients
-
-# ------------------------------------------------------------
-
-print("\n" + "=" * 100)
-
-print("2) TRUE-LP CAREHOME QUARTILE OUTCOME GRADIENT")
-
-print("=" * 100)
-
-show_cols = [
-
-    "scenario_id",
-
-    "lp_quartile",
-
-    "n",
-
-    "mean_true_lp",
-
-    "carehome_rate",
-
-    "death_before_carehome_rate",
-
-    "event_free_or_censored_rate",
-
-    "death_after_carehome_rate",
-
-    "median_duration_years",
-
-]
-
-if "mean_true_risk_carehome_5y_observable_approx" in gradient_table.columns:
-
-    show_cols.append("mean_true_risk_carehome_5y_observable_approx")
-
-if "any_death_5y_rate" in gradient_table.columns:
-
-    show_cols.append("any_death_5y_rate")
-
-show_grad = gradient_table[show_cols].copy()
-
-# Round for readable print
-
-for c in show_grad.columns:
-
-    if c not in ["scenario_id", "lp_quartile", "n"]:
-
-        show_grad[c] = pd.to_numeric(show_grad[c], errors="coerce").round(4)
-
-print(show_grad.to_string(index=False))
-
-print(f"\nSaved true-LP quartile gradient audit to:\n{gradient_out}")
-
-# ------------------------------------------------------------
-
-# Simple pass/fail monotonic sanity check
-
-# ------------------------------------------------------------
-
-print("\n" + "=" * 100)
-
-print("3) SIMPLE MONOTONICITY CHECK: carehome_rate should increase from Q1 to Q4")
-
-print("=" * 100)
-
-mono_rows = []
-
-for sid, sub in gradient_table.groupby("scenario_id"):
-
-    rates = sub.sort_values("lp_quartile")["carehome_rate"].to_numpy()
-
-    monotonic_non_decreasing = bool(np.all(np.diff(rates) >= -1e-8))
-
-    mono_rows.append({
-
-        "scenario_id": sid,
-
-        "Q1_carehome_rate": rates[0],
-
-        "Q4_carehome_rate": rates[-1],
-
-        "Q4_minus_Q1": rates[-1] - rates[0],
-
-        "monotonic_non_decreasing": monotonic_non_decreasing,
-
-    })
-
-mono_table = pd.DataFrame(mono_rows)
-
-mono_out = AUDIT_DIR / "quick_audit_true_lp_monotonicity_check.csv"
-
-mono_table.to_csv(mono_out, index=False)
-
-mono_show = mono_table.copy()
-
-for c in ["Q1_carehome_rate", "Q4_carehome_rate", "Q4_minus_Q1"]:
-
-    mono_show[c] = mono_show[c].round(4)
-
-print(mono_show.to_string(index=False))
-
-print(f"\nSaved monotonicity check to:\n{mono_out}")

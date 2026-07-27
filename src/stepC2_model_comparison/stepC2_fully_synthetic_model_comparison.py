@@ -1,37 +1,9 @@
 #!/usr/bin/env python3
-"""Step C2 fully synthetic cause-specific survival model comparison.
+"""Step C2 fully synthetic survival / competing-risk model comparison.
 
-Inputs
-------
-Expected local input directory: ``fully_synthetic_stepC_v1/``. The directory is
-not included in this repository.
-
-Outputs
--------
-Writes aggregate model comparison tables, audits, plots, and optional debug
-prediction samples to ``fully_synthetic_stepC2_model_comparison/``.
-
-Data governance
----------------
-This script uses exportable fully synthetic Step C files only. It does not use
-real SLAM data, internal Step B semi-synthetic data, raw spreadsheets, or real
-patient identifiers.
-
-Run
----
-Debug mode: ``python src/stepC2_model_comparison/stepC2_fully_synthetic_model_comparison.py --debug``.
-Full mode: ``python src/stepC2_model_comparison/stepC2_fully_synthetic_model_comparison.py --full``.
-
-Models
-------
-Oracle synthetic truth benchmark, DGM-feature Cox, strict all-safe penalised
-Cox, and strict all-safe XGBoost survival Cox risk scoring.
-
-Notes
------
-For C2, status=1 is care-home entry. Status=0 and status=2 are treated as
-censored for cause-specific survival modelling. This is not a full
-competing-risk absolute-risk analysis.
+This script uses only the exportable fully synthetic Step C package under
+fully_synthetic_stepC_v1/. It treats status=1 as care-home entry and treats
+status=0 and status=2 as censored for cause-specific survival modelling.
 """
 
 from __future__ import annotations
@@ -190,7 +162,7 @@ SCENARIO_MEANINGS = {
     "S2_linear_PH_inst45": "high-event scenario",
     "S3_nonlinear_interaction_inst30": "nonlinear + interaction scenario",
     "S4_nonPH_inst30": "non-proportional hazards scenario",
-    "S5_MAR_missingness_inst30": "MAR missingness scenario",
+    "S5_MAR_missingness_inst30": "stronger MAR-lite structured missingness scenario",
     "S6_highdim_sparseMRI_inst30": "high-dimensional sparse MRI signal scenario",
     "S7_strong_death_competing_inst30": "stronger death competing risk scenario",
 }
@@ -201,18 +173,18 @@ SCENARIO_PRIMARY_QUESTIONS = {
     "S2_linear_PH_inst45": "How stable are fitted models when the event rate is higher?",
     "S3_nonlinear_interaction_inst30": "Does the nonlinear/interaction scenario favour the nonlinear XGBoost risk score?",
     "S4_nonPH_inst30": "How much does non-proportional hazards affect proportional Cox baselines?",
-    "S5_MAR_missingness_inst30": "Does MAR missingness reduce fitted-model performance or alignment with truth?",
+    "S5_MAR_missingness_inst30": "Does stronger MAR-lite structured missingness reduce fitted-model performance or alignment with truth?",
     "S6_highdim_sparseMRI_inst30": "Do high-dimensional safe predictors help in the sparse MRI-signal scenario?",
     "S7_strong_death_competing_inst30": "Does stronger death-before-care-home competing risk change relative model performance?",
 }
 
 SCENARIO_EXPECTED_PATTERNS = {
-    "S0_linear_PH_inst30": "Cox DGM should stay close to oracle; flexible models should not exceed oracle suspiciously.",
+    "S0_linear_PH_inst30": "Cox DGM should stay close to the oracle benchmark; flexible-model outperformance beyond the audit tolerance should be investigated.",
     "S1_linear_PH_inst15": "Lower event counts may reduce precision, but Cox DGM should remain close to oracle.",
     "S2_linear_PH_inst45": "Higher event counts should support stable discrimination; Cox DGM should remain close to oracle.",
-    "S3_nonlinear_interaction_inst30": "A nonlinear model may become more competitive, while oracle remains the upper benchmark.",
+    "S3_nonlinear_interaction_inst30": "A nonlinear model may become more competitive; the oracle remains a DGM benchmark rather than a guaranteed finite-sample ceiling.",
     "S4_nonPH_inst30": "Proportional Cox models may lose some discrimination under time-varying effects.",
-    "S5_MAR_missingness_inst30": "Missingness can reduce fitted-model performance and truth alignment.",
+    "S5_MAR_missingness_inst30": "Stronger MAR-lite structured missingness can reduce fitted-model performance and truth alignment.",
     "S6_highdim_sparseMRI_inst30": "Penalised Cox or XGBoost may become more competitive if sparse MRI signal is captured.",
     "S7_strong_death_competing_inst30": "Cause-specific models may show changed performance because competing deaths censor more observations.",
 }
@@ -380,6 +352,10 @@ def parse_safe_bool(x: Any) -> bool:
 def bool_series_all_true(series: pd.Series) -> bool:
     values = series.map(parse_safe_bool)
     return bool(values.all())
+
+
+def parse_bool_series(series: pd.Series) -> pd.Series:
+    return series.map(parse_safe_bool)
 
 
 def get_csv_header(path: Path) -> List[str]:
@@ -635,9 +611,9 @@ def build_predictor_lists(
         raise RuntimeError("No all-safe predictors could be built.")
 
     print(f"All-safe predictor count: {len(safe_predictors)}")
-    print(f"DGM fallback predictor count: {len(dgm_predictors)}")
+    print(f"DGM-informed observable predictor count: {len(dgm_predictors)}")
     if missing_intended:
-        print("Missing intended DGM fallback features:", ", ".join(missing_intended))
+        print("Missing intended DGM-informed features:", ", ".join(missing_intended))
     print("Predictor audits saved under", paths["tables"])
 
     return {
@@ -724,7 +700,7 @@ def calibration_slope(observed: np.ndarray, pred_risk: np.ndarray) -> float:
         return np.nan
     x_logit = safe_logit(pred_risk[mask]).reshape(-1, 1)
     try:
-        model = LogisticRegression(penalty="none", solver="lbfgs", max_iter=1000)
+        model = LogisticRegression(penalty=None, solver="lbfgs", max_iter=1000)
         model.fit(x_logit, y)
         return float(model.coef_[0][0])
     except Exception:
@@ -1181,7 +1157,7 @@ def load_existing_performance(paths: Dict[str, Path]) -> pd.DataFrame:
 def success_keys_from_performance(perf: pd.DataFrame) -> set[Tuple[str, str, str]]:
     if perf.empty:
         return set()
-    success = perf.loc[~perf["failed"].astype(bool)].copy()
+    success = perf.loc[~parse_bool_series(perf["failed"])].copy()
     return {
         result_key(row.scenario_id, row.replicate_id, row.model)
         for row in success.itertuples(index=False)
@@ -1285,7 +1261,7 @@ def process_scenario_file(
             checkpoint = save_performance_checkpoint(result_rows, paths)
             print(
                 f"    saved checkpoint: rows={len(checkpoint)} "
-                f"failures={int(checkpoint['failed'].astype(bool).sum())}"
+                f"failures={int(parse_bool_series(checkpoint['failed']).sum())}"
             )
 
     del scenario_df
@@ -1334,9 +1310,10 @@ def aggregate_results(perf: pd.DataFrame, paths: Dict[str, Path]) -> pd.DataFram
     ]
     rows: List[Dict[str, Any]] = []
     for (scenario_id, model_name), group in perf.groupby(["scenario_id", "model"], sort=True):
-        success = group.loc[~group["failed"].astype(bool)].copy()
+        failed = parse_bool_series(group["failed"])
+        success = group.loc[~failed].copy()
         n_success = int(success.shape[0])
-        n_failed = int(group["failed"].astype(bool).sum())
+        n_failed = int(failed.sum())
         row: Dict[str, Any] = {
             "scenario_id": scenario_id,
             "model": model_name,
@@ -1394,7 +1371,10 @@ def save_failure_log(perf: pd.DataFrame, paths: Dict[str, Path]) -> None:
         "n_events_train",
         "n_events_test",
     ]
-    failures = perf.loc[perf["failed"].astype(bool), [c for c in failure_cols if c in perf.columns]]
+    failures = perf.loc[
+        parse_bool_series(perf["failed"]),
+        [c for c in failure_cols if c in perf.columns],
+    ]
     failures.to_csv(paths["tables"] / "failure_log.csv", index=False)
 
 
@@ -1596,7 +1576,7 @@ def create_scenario_interpretation_table(
         else:
             short = "Observed pattern summarised from the full-run model comparison."
 
-        if bool(xgb_info.get("needs_leakage_audit", False)):
+        if parse_safe_bool(xgb_info.get("needs_leakage_audit", False)):
             short += " XGBoost sanity flags require follow-up audit."
 
         rows.append(
@@ -1626,7 +1606,10 @@ def any_forbidden_predictor_flag(paths: Dict[str, Path]) -> bool:
     audit = pd.read_csv(audit_path)
     if not {"included_in_all_safe_predictors", "column"}.issubset(audit.columns):
         return True
-    included = audit.loc[audit["included_in_all_safe_predictors"].astype(bool), "column"].astype(str)
+    included = audit.loc[
+        parse_bool_series(audit["included_in_all_safe_predictors"]),
+        "column",
+    ].astype(str)
     return any(contains_forbidden_name(col) for col in included)
 
 
@@ -1642,7 +1625,9 @@ def create_full_run_sanity_checks(
     reps_by_scenario = perf.groupby("scenario_id")["replicate_id"].nunique() if not perf.empty else pd.Series(dtype=int)
     observed_min_reps = int(reps_by_scenario.min()) if not reps_by_scenario.empty else 0
     observed_max_reps = int(reps_by_scenario.max()) if not reps_by_scenario.empty else 0
-    total_failed = int(perf["failed"].astype(bool).sum()) if not perf.empty else 0
+    total_failed = (
+        int(parse_bool_series(perf["failed"]).sum()) if not perf.empty else 0
+    )
     failure_log_path = paths["tables"] / "failure_log.csv"
     if failure_log_path.exists():
         try:
@@ -1651,7 +1636,11 @@ def create_full_run_sanity_checks(
             failure_log_rows = 0
     else:
         failure_log_rows = 0
-    any_xgb_flag = bool(xgb_audit["needs_leakage_audit"].astype(bool).any()) if not xgb_audit.empty else True
+    any_xgb_flag = (
+        bool(parse_bool_series(xgb_audit["needs_leakage_audit"]).any())
+        if not xgb_audit.empty
+        else True
+    )
     forbidden_flag = any_forbidden_predictor_flag(paths)
     export_safety_passed = bool_series_all_true(safety["safe_to_export_column_names"])
     acceptable_failure_rate = (
@@ -1846,7 +1835,9 @@ def make_figures(summary: pd.DataFrame, perf: pd.DataFrame, paths: Dict[str, Pat
     if perf.empty:
         failure_rate = pd.Series(dtype=float)
     else:
-        failure_rate = perf.groupby("model")["failed"].apply(lambda s: s.astype(bool).mean())
+        failure_rate = perf.groupby("model")["failed"].apply(
+            lambda series: parse_bool_series(series).mean()
+        )
         failure_rate = failure_rate.reindex([m for m in MODELS if m in failure_rate.index])
     fig, ax = plt.subplots(figsize=(8.5, 4.8))
     if failure_rate.empty:
@@ -1898,7 +1889,7 @@ def write_readme(
     started_at: datetime,
     finished_at: datetime,
 ) -> None:
-    n_fail = int(perf["failed"].astype(bool).sum()) if not perf.empty else 0
+    n_fail = int(parse_bool_series(perf["failed"]).sum()) if not perf.empty else 0
     n_rows = int(perf.shape[0])
     lines = [
         "# Step C2 Fully Synthetic Model Comparison",
@@ -1932,7 +1923,7 @@ def write_readme(
         "## Models",
         "",
         "- `oracle_true_lp_not_a_model`: benchmark using exported simulation truth, not a fitted model.",
-        "- `cox_dgm_features`: cause-specific Cox model using the saved DGM fallback predictor list.",
+        "- `cox_dgm_features`: cause-specific Cox model using the saved DGM-informed observable predictor list.",
         "- `penalised_cox_all_safe_predictors`: penalised cause-specific Cox model using strict safe baseline predictors.",
         "- `xgb_survival_cox_strict`: leakage-guarded XGBoost `survival:cox` model using strict safe baseline predictors and returning risk scores only.",
         "",
@@ -1941,11 +1932,11 @@ def write_readme(
         "## Predictor Audits",
         "",
         f"- All-safe predictor count: {len(predictors.get('all_safe_predictors', []))}",
-        f"- DGM fallback predictor count: {len(predictors.get('dgm_predictors', []))}",
+        f"- DGM-informed observable predictor count: {len(predictors.get('dgm_predictors', []))}",
         "- `tables/predictor_audit_all_safe.csv` records exact inclusion and exclusion decisions.",
-        "- `tables/predictor_audit_dgm_features.csv` records exact DGM fallback features and any missing intended features.",
+        "- `tables/predictor_audit_dgm_features.csv` records the exact observable DGM-informed features and any missing intended features.",
         "",
-        "The DGM definition table in this export describes scenario-level DGM settings but does not enumerate exact predictor coefficients. Therefore the Cox DGM model uses a conservative clinical fallback list and records that decision explicitly.",
+        "The DGM definition table available to the original C2 specification describes scenario-level settings but does not enumerate an exact coefficient-to-column mapping. The Cox model therefore uses a fixed conservative observable DGM-informed set. C5A later audits the generator coefficients; it does not retroactively make this fitted predictor set the exact algebraic DGM.",
         "",
         "## Outputs",
         "",
@@ -1998,13 +1989,13 @@ def write_readme(
         [
             "## Scientific Interpretation Notes",
             "",
-            "- `oracle_true_lp_not_a_model` is an upper benchmark under the simulated DGM, not a real deployable model.",
-            "- `cox_dgm_features` should perform close to oracle in S0/S1/S2 if the pipeline and fallback DGM feature list align well with the simulated DGM.",
+            "- `oracle_true_lp_not_a_model` is a DGM benchmark, not a deployable model or a guaranteed finite-sample upper bound for every empirical metric.",
+            "- `cox_dgm_features` should approach the oracle ranking in S0/S1/S2 when the fixed observable DGM-informed set captures the dominant simulated signal.",
             "- `penalised_cox_all_safe_predictors` tests whether high-dimensional synthetic predictors add noise or recover extra signal.",
-            "- `xgb_survival_cox_strict` should not unrealistically exceed oracle. If it does, leakage or evaluation artefacts must be audited.",
+            "- Implausible XGBoost outperformance of the oracle beyond the prespecified tolerance triggers a leakage or evaluation audit.",
             "- S3 tests nonlinear and interaction effects.",
-            "- S4 tests non-proportional hazards.",
-            "- S5 tests MAR missingness.",
+            "- S4 tests non-proportional hazards; its exported truth fields are approximate proxies.",
+            "- S5 tests stronger MAR-lite structured missingness, not strict observed-data MAR.",
             "- S6 tests high-dimensional sparse MRI signal.",
             "- S7 tests stronger death competing risk.",
             "",
@@ -2044,7 +2035,7 @@ def write_full_readme(
 ) -> None:
     perf = dedupe_performance(perf)
     n_rows = int(perf.shape[0])
-    n_fail = int(perf["failed"].astype(bool).sum()) if not perf.empty else 0
+    n_fail = int(parse_bool_series(perf["failed"]).sum()) if not perf.empty else 0
     best = additional.get("best_non_oracle_model_by_scenario", pd.DataFrame())
     diff = additional.get("model_difference_vs_oracle_by_scenario", pd.DataFrame())
     xgb_audit = additional.get("xgb_oracle_sanity_audit_full", pd.DataFrame())
@@ -2080,7 +2071,7 @@ def write_full_readme(
     )
     s7_best = best_model("S7_strong_death_competing_inst30")
     any_xgb_flag = (
-        bool(xgb_audit["needs_leakage_audit"].astype(bool).any())
+        bool(parse_bool_series(xgb_audit["needs_leakage_audit"]).any())
         if not xgb_audit.empty and "needs_leakage_audit" in xgb_audit.columns
         else True
     )
@@ -2088,7 +2079,7 @@ def write_full_readme(
     if not sanity.empty:
         rows = sanity.loc[sanity["check_name"] == "full_run_passed"]
         if not rows.empty:
-            full_run_passed = bool(rows.iloc[0]["observed"])
+            full_run_passed = parse_safe_bool(rows.iloc[0]["observed"])
 
     if np.isfinite(s5_best_c) and np.isfinite(s0_best_c):
         s5_delta_text = f"S5 best fitted-model C-index was {fmt_float(s5_best_c)} versus S0 {fmt_float(s0_best_c)} (delta {fmt_float(s5_best_c - s0_best_c)})."
@@ -2166,18 +2157,18 @@ def write_full_readme(
         "## Limitations",
         "",
         "- Fully synthetic data are for method testing, not clinical inference.",
-        "- Cox DGM uses a fallback DGM-relevant predictor list unless exact DGM coefficients are exported.",
+        "- The Cox DGM-informed set is an observable proxy set, not the latent variables, true coefficients, or exact algebraic DGM.",
         "- This first Step C2 uses cause-specific modelling only; Fine-Gray and CIF evaluation are not included.",
         "- XGBoost outputs risk scores only, not calibrated 5-year absolute risk.",
         "",
         "## Next Recommended Step",
         "",
-        "If the full run passes, proceed to Step C3: add competing-risk-specific evaluation / Fine-Gray or CIF reconstruction, or prepare the current summary for Daniel/Ash.",
+        "After the full run passes, use Step C3 for two-cause CIF reconstruction and five-year competing-risk evaluation, then Step C4 for Fine-Gray and the extended model families.",
         "",
         "## Predictor Lists",
         "",
         f"- All-safe predictor count: {len(predictors.get('all_safe_predictors', []))}",
-        f"- DGM fallback predictor count: {len(predictors.get('dgm_predictors', []))}",
+        f"- DGM-informed observable predictor count: {len(predictors.get('dgm_predictors', []))}",
         "- Exact lists are saved in `tables/predictor_list_all_safe.csv` and `tables/predictor_list_dgm_features.csv`.",
         "",
     ]
@@ -2237,7 +2228,9 @@ def main() -> None:
     if not config.debug_mode:
         write_full_readme(config, paths, predictors, perf, summary, additional, started_at, finished_at)
     total_runtime = time.perf_counter() - start_perf
-    failure_count = int(perf["failed"].astype(bool).sum()) if not perf.empty else 0
+    failure_count = (
+        int(parse_bool_series(perf["failed"]).sum()) if not perf.empty else 0
+    )
     print("Done.")
     print(f"Total runtime seconds: {total_runtime:.1f}")
     print(f"replicate_model_performance row count: {len(perf)}")

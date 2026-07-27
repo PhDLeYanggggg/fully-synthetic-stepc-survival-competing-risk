@@ -1,9 +1,0 @@
-scenario_id,best_C4_absolute_risk_model,oracle_sanity_flags,interpretation
-S0_linear_PH_inst30,finegray_dgm_cif_R,2,Linear PH baseline: Cox/Fine-Gray-style models are expected to remain competitive; RSF/GBSA need not improve.
-S1_linear_PH_inst15,finegray_dgm_cif_R,2,Lower event-rate linear PH setting: simple structured models should remain stable if calibration is adequate.
-S2_linear_PH_inst45,finegray_dgm_cif_R,2,Higher event-rate linear PH setting: absolute-risk error and calibration should be checked alongside ranking.
-S3_nonlinear_interaction_inst30,finegray_dgm_cif_R,2,Nonlinear/interaction setting: RSF or GBSA may become more competitive if the nonlinear signal is strong enough.
-S4_nonPH_inst30,finegray_dgm_cif_R,2,"Non-PH setting: flexible models may improve ranking, but absolute-risk calibration must be interpreted separately."
-S5_MAR_missingness_inst30,finegray_dgm_cif_R,2,MAR missingness setting: high-dimensional models may become less stable if missingness interacts with weak signals.
-S6_highdim_sparseMRI_inst30,finegray_all_safe_reduced_R,2,High-dimensional sparse MRI setting: all-safe RSF/GBSA or penalised Cox-style models may have an advantage.
-S7_strong_death_competing_inst30,finegray_dgm_cif_R,2,Strong competing-death setting: Fine-Gray and CIF-reconstruction models should be compared against individualised Cox CIF and AJ-null baselines.

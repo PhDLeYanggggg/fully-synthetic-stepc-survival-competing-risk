@@ -16,7 +16,9 @@ For Step C2, `status = 1` is the event of interest. Both `status = 0` and `statu
 
 ## Models
 
-- `oracle_true_lp_not_a_model`: benchmark using the known synthetic linear predictor.
+- `oracle_true_lp_not_a_model`: benchmark using the exported synthetic linear
+  predictor. It is an exact time-constant care-home log-hazard score in the PH
+  scenarios but only a base-LP proxy in S4.
 - `cox_dgm_features`: cause-specific Cox model using DGM-relevant features.
 - `penalised_cox_all_safe_predictors`: penalised Cox model using strict all-safe baseline predictors.
 - `xgb_survival_cox_strict`: XGBoost survival Cox risk-score model using the same strict safe predictors.
@@ -33,3 +35,7 @@ For Step C2, `status = 1` is the event of interest. Both `status = 0` and `statu
 The full run completed 1,600 replicate-model rows with 0 failures. The best fitted model was `cox_dgm_features` in seven scenarios and `penalised_cox_all_safe_predictors` in S6.
 
 The XGBoost model did not exceed the oracle benchmark implausibly, supporting the leakage guard.
+
+S4 comparisons with the exported LP are exploratory because the actual early
+and late non-PH predictors were not exported. Observed cause-specific C-index
+does not depend on that proxy and remains a valid performance metric.

@@ -4,9 +4,12 @@ This document describes the full project workflow from the internal SLAM diagnos
 
 ## 1. Project Background
 
-The starting point was an internal SLAM diagnostic modelling dataset for dementia subtype classification. The diagnostic labels in that earlier project were AD, Mixed, and Non-AD. During internal preparation, the raw diagnostic modelling data contained approximately 24,418 rows. After aligning MMSE with scan date and de-duplicating at scan level, the working scan-level dataset contained approximately 4,213 scans. A further baseline-only restriction, keeping the first scan for each person, produced approximately 3,963 baseline individuals.
-
-Those internal counts are included here only to explain the development history. The underlying real patient-level data are not part of this repository.
+The starting point was an internal SLAM diagnostic modelling workflow for
+dementia subtype classification. The diagnostic labels in that earlier
+project were AD, Mixed, and Non-AD. The internal workflow aligned cognition
+with scan date, de-duplicated scans, and retained a baseline observation per
+person. Exact internal cohort counts are intentionally not disclosed in this
+code-only repository.
 
 The internal data structure provided the variable organisation needed for simulation. Baseline predictors included:
 
@@ -82,7 +85,7 @@ The eight scenarios are:
 - `S2_linear_PH_inst45`: higher event-rate scenario, approximately 45%;
 - `S3_nonlinear_interaction_inst30`: nonlinear and interaction-effect scenario;
 - `S4_nonPH_inst30`: non-proportional-hazards scenario;
-- `S5_MAR_missingness_inst30`: MAR missingness scenario;
+- `S5_MAR_missingness_inst30`: higher MAR-lite structured missingness scenario;
 - `S6_highdim_sparseMRI_inst30`: high-dimensional sparse MRI signal scenario;
 - `S7_strong_death_competing_inst30`: stronger death competing-risk scenario.
 
@@ -148,7 +151,9 @@ C3 uses cause-specific Cox models to reconstruct the care-home cumulative incide
 - `cs_cox_dgm_cif`;
 - `cs_penalised_cox_all_safe_cif`.
 
-Fine-Gray evaluation is optional. In the local run, it was skipped because the R package `cmprsk` was unavailable or failed. This did not affect the mandatory C3 pipeline.
+Fine-Gray is outside the specified four-entry C3 comparison. It is evaluated in
+Step C4, where the final specified Fine-Gray comparisons completed using the R
+package `cmprsk`.
 
 The completed C3 full run contained:
 
@@ -158,22 +163,20 @@ failures = 0
 full_run_passed = True
 ```
 
-Core C3 metrics included MAE and RMSE versus the exported synthetic 5-year true risk, naive 5-year Brier score, observed 5-year AUC, calibration slope and intercept, calibration deciles, and a cause-specific C-index for continuity with C2.
+Core C3 metrics included MAE and RMSE versus the exported five-year DGM target
+in the seven proportional-hazards scenarios (with the S4 field treated as a
+qualified proxy), five-year Brier score, observed five-year AUC, calibration
+slope and intercept, calibration deciles, and a cause-specific C-index for
+continuity with C2. All status-0 observations were administratively censored at
+five years, so the binary five-year event indicator was observed for every
+individual.
 
-Best fitted C3 model by mean 5-year risk MAE:
-
-| Scenario | Best model | MAE | Brier | AUC | Calibration slope |
-| --- | --- | ---: | ---: | ---: | ---: |
-| S0_linear_PH_inst30 | cs_cox_dgm_cif | 0.03708 | 0.1912 | 0.6860 | 0.9483 |
-| S1_linear_PH_inst15 | cs_cox_dgm_cif | 0.02707 | 0.1217 | 0.6668 | 0.8879 |
-| S2_linear_PH_inst45 | cs_cox_dgm_cif | 0.04013 | 0.2200 | 0.6929 | 0.9498 |
-| S3_nonlinear_interaction_inst30 | cs_cox_dgm_cif | 0.05246 | 0.1808 | 0.7252 | 0.9118 |
-| S4_nonPH_inst30 | cs_cox_dgm_cif | 0.04990 | 0.1950 | 0.6668 | 0.8777 |
-| S5_MAR_missingness_inst30 | cs_cox_dgm_cif | 0.04015 | 0.1930 | 0.6770 | 0.9098 |
-| S6_highdim_sparseMRI_inst30 | cs_penalised_cox_all_safe_cif | 0.04558 | 0.1834 | 0.7175 | 0.8793 |
-| S7_strong_death_competing_inst30 | cs_cox_dgm_cif | 0.03665 | 0.1940 | 0.6711 | 0.9334 |
-
-The best non-oracle model was `cs_cox_dgm_cif` in 7 of 8 scenarios. The exception was S6, where `cs_penalised_cox_all_safe_cif` was best. In S7, the best C3 model had mean MAE 0.0367, whereas the Aalen-Johansen null MAE was 0.1088. This supports the value of individualised competing-risk prediction in the stronger competing-death setting.
+Post-QC results are described qualitatively in the public repository.
+DGM-informed Cox CIF prediction was generally stable, while the all-safe model
+was most useful when additional regional MRI variables carried signal. In the
+strong competing-mortality scenario, individualised prediction clearly
+improved on the non-individualised Aalen-Johansen baseline. Numerical tables
+remain local pending explicit author approval.
 
 ## 7. Overall Interpretation
 
@@ -183,11 +186,21 @@ The main lessons are:
 
 - simulation helped test the pipeline before real outcome availability;
 - correctly structured Cox models were robust across most scenarios;
-- more complex models did not generally outperform Cox;
+- no model family dominated every scenario and metric;
 - the high-dimensional sparse MRI scenario was the main setting where an all-safe penalised Cox model was preferable;
 - individualised competing-risk CIF prediction improved on a non-individualised Aalen-Johansen null in the strong competing-death scenario;
-- strict leakage filtering prevented XGBoost from producing implausibly high results.
+- strict leakage filtering prevented forbidden reference and truth fields from
+  entering fitted models.
 
 ## 8. Limitations
 
-The care-home endpoint is simulated, not a real SLAM outcome. Step B semi-synthetic data cannot be exported because it contains real patient-level predictors. Step C synthetic data can be exported, but the large scenario datasets are not committed to GitHub. Step C2 is a cause-specific ranking analysis rather than a competing-risk absolute-risk analysis. Step C3 uses cause-specific Cox CIF reconstruction. The Brier score in C3 is naive rather than IPCW-adjusted. Earlier DGM-feature models used fallback predictor lists; Step C5A now exports exact raw pre-rescaling DGM coefficients, while final effective coefficients still require repetition-level raw-LP moments that were not exported in Step C v1. The post-care-home death-hazard multiplier is a simulation assumption about a high-frailty post-care-home state, not a causal claim.
+The care-home endpoint is simulated, not a real SLaM outcome. Step B
+semi-synthetic data cannot be exported because it contains real patient-level
+predictors. Step C synthetic data can be exported, but the large scenario
+datasets are not committed to GitHub. Step C2 is a cause-specific ranking
+analysis rather than a competing-risk absolute-risk analysis. Step C3 uses
+cause-specific Cox CIF reconstruction. Step C5A exports exact raw
+pre-rescaling DGM coefficients, while final effective coefficients still
+require repetition-level raw-LP moments that were not exported in Step C v1.
+The post-care-home death-hazard multiplier is a simulation assumption about a
+high-frailty post-care-home state, not a causal claim.

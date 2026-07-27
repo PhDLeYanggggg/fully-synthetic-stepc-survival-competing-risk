@@ -1,10 +1,10 @@
 cff-version: 1.2.0
 message: "If you use this code, please cite this repository."
-title: "SLAM-informed Synthetic Simulation for Dementia Institutionalisation Prediction"
+title: "Fully Synthetic Competing-Risk Benchmark for Care-Home Admission"
 authors:
-  - family-names: "Le"
-    given-names: "Yangyue"
+  - family-names: "Yang"
+    given-names: "Le"
 year: 2026
 license: MIT
 repository-code: "https://github.com/PhDLeYanggggg/fully-synthetic-stepc-survival-competing-risk"
-abstract: "Code and documentation for a fully synthetic survival and competing-risk simulation framework for dementia institutionalisation prediction."
+abstract: "Code and documentation for a leakage-controlled repeated simulation study of care-home admission under competing mortality."

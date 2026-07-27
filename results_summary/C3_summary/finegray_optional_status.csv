@@ -1,2 +1,0 @@
-finegray_available,finegray_ran,finegray_failure_reason,optional_status,r_script_path
-False,False,cmprsk_not_installed_or_failed,skipped_optional_not_part_of_mandatory_C3_v1,stepC3_finegray_optional.R

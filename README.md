@@ -1,274 +1,272 @@
-# SLAM-informed Synthetic Simulation for Dementia Institutionalisation Prediction
+# Fully Synthetic Competing-Risk Benchmark for Care-Home Admission
 
-This repository contains a code and documentation release for a synthetic simulation framework inspired by the structure of SLAM dementia imaging and clinical data. The project evaluates survival and competing-risk methods for predicting care-home entry or institutionalisation.
+This repository contains the code and methodological documentation for a
+repeated simulation study of time to care-home admission in the presence of
+death before care-home admission.
 
-The repository is intentionally code-first. It does not contain real SLAM data, internal semi-synthetic SLAM data, large synthetic scenario datasets, raw spreadsheets, identifiers, or per-person prediction files.
+The release is intentionally code-only. It contains no real SLaM records, no
+semi-synthetic records, no synthetic individual-level datasets, no
+individual-level predictions, and no result tables or figures.
 
-## Research Aim
+## Study Purpose
 
-The motivation is methodological. Real care-home entry dates were not yet available for direct prognostic modelling, so the project first builds a controlled simulation framework to test the modelling pipeline, outcome coding, competing-death handling, model comparison workflow, and leakage controls before applying similar methods to real outcomes.
+Exact care-home entry dates were not available when the modelling pipeline was
+designed. A fully synthetic benchmark with a closed-form five-year CIF target in seven
+proportional-hazards scenarios and an explicitly qualified proxy in the
+non-proportional-hazards scenario was therefore created to test:
 
-The simulation route is:
+- outcome coding and train/test separation;
+- cause-specific and competing-risk prediction;
+- predictor leakage controls;
+- discrimination, absolute-risk error, and calibration;
+- robustness to nonlinearity, non-proportional hazards, missingness,
+  high-dimensional sparse MRI signal, and stronger competing mortality.
+
+The study is a software and methods benchmark. It is not a clinical validation
+study and its coefficients are not estimates of effects in real patients.
+
+## Simulation Design
+
+Eight scenarios each contain 50 independently generated repetitions of 5,000
+synthetic individuals. Baseline demographic, cognition, MRI, WMH, structured
+NLP, comorbidity, and deprivation variables are generated from explicit
+probability models. Four shared latent factors induce dependence among
+observable variables.
+
+The generator's `MAR-lite` label denotes structured missingness imposed after
+outcome generation. Missingness depends partly on exported variables and partly
+on unexported latent frailty, vascular, and neurodegenerative factors. It is
+therefore informative missingness from the analyst's observed-data perspective,
+not a claim of strict Rubin-MAR.
+
+The primary endpoint is time to care-home entry:
+
+- `status = 0`: event-free at five years;
+- `status = 1`: care-home entry;
+- `status = 2`: death before care-home entry.
+
+Death after care-home entry is a secondary post-care-home state and is not the
+competing event for the primary endpoint.
+
+The care-home and death data-generating mechanisms are prespecified simulation
+designs. Their coefficients control signal direction and difficulty; they are
+not fitted clinical hazard ratios. See
+[the generator documentation](docs/04_stepC_fully_synthetic_generator.md) and
+[the exact DGM audit](docs/13_stepC5A_exact_DGM_coefficients.md).
+
+## Analysis Stages
 
 ```text
-Real SLAM diagnostic data structure
-    |
-Internal semi-synthetic Step B
-    |
-Fully synthetic exportable Step C
-    |
-Step C2 cause-specific model comparison
-    |
-Step C3 competing-risk 5-year risk evaluation
-    |
-Step C4 extended survival and competing-risk model comparison
-    |
-Step C4A calibration-slope audit
-    |
-Step C5A exact DGM coefficient export
+Step C   fully synthetic data generation
+Step C2  cause-specific ranking baselines
+Step C3  five-year competing-risk prediction
+Step C4  extended classical and canonical neural models
+Step C5A exact DGM coefficient and reconstruction audit
+Step C6  paired publication-oriented statistical synthesis
 ```
 
-## Repository Contents
+Step C2 compares the exported oracle/proxy benchmark, DGM-informed cause-specific Cox,
+penalised all-safe Cox, and strict XGBoost-Cox risk scores.
+
+Step C3 compares the oracle five-year risk benchmark, a non-individualised
+Aalen-Johansen estimate, and two-cause cumulative-incidence predictions from
+DGM-informed and all-safe Cox models.
+
+Step C4 adds Fine-Gray, Random Survival Forest, Gradient Boosting Survival,
+canonical `pycox.models.CoxPH` DeepSurv models, and canonical
+`pycox.models.DeepHit` competing-risk models. DeepHit tuning is performed only
+inside the outer training sample.
+
+Step C6 performs paired comparisons within scenario and repetition, Monte Carlo
+standard-error estimation, normal and bootstrap confidence intervals,
+calibration summaries, model ranks, and stress-test contrasts. It fits no model
+and regenerates no data. It also writes SHA-256 manifests for the local
+synthetic package, C2-C4 model-result tables, C5A DGM-audit tables, and final
+audited analysis-source state used by the publication synthesis.
+
+The original 50-repetition count was a pragmatic computational choice, not a
+prospective precision calculation. Step C6 reports realised Monte Carlo
+standard errors and confidence-interval half-widths for transparency.
+
+The original C2 specification preceded its post-QC full run. C3, C4, and C6
+were later extensions and were not prospectively registered; C6 hypothesis
+tests are exploratory, with paired effect estimates and Monte Carlo uncertainty
+treated as primary.
+
+## Truth-Target Qualification
+
+In S0-S3 and S5-S7, conditional event times use two independent, time-constant
+cause-specific hazards. The exported two-hazard expression is the closed-form
+five-year CIF implied by the returned calibrated hazards and LPs. If those
+hazards are treated as fixed, the expression is their algebraic CIF. Because
+baseline rates were selected using the realised unit-exponential draws in each
+finite repetition, it is interpreted as an analytic target on the calibrated
+DGM hazard surface rather than a population conditional probability fixed
+independently before that repetition was generated.
+
+S4 generates care-home times from separate early and late predictors, including
+an unexported latent-frailty term. Its exported risk and LP fields use a single
+base predictor and are approximate non-PH proxies. S4 truth-based error and
+oracle comparisons are exploratory. Observed-outcome Brier score, AUC,
+calibration, and cause-specific C-index remain valid.
+
+## Post-QC Status
+
+The locked local analyses contain:
+
+- 1,600 Step C2 scenario-repetition-model evaluations;
+- 1,600 calibrated Step C3 evaluations;
+- 4,000 strict Step C4 evaluations;
+- 7,200 harmonised C2-C4 replicate-model records in the Step C6 synthesis;
+- 50 complete repetitions in every scenario-model cell;
+- no failed or skipped required model fits;
+- no forbidden predictor in a fitted post-QC model; and
+- independently recomputed SHA-256 manifests matching the locked input tables
+  and audited analysis-source state.
+
+The final all-safe set contains 157 baseline predictors. Reference diagnosis,
+outcome, post-baseline, identifier, hazard, risk, censoring, and simulation-truth
+fields are excluded by block, role, and forbidden-name checks. Export-safety
+values are parsed explicitly, so the string `"False"` cannot be interpreted as
+safe.
+
+## Qualitative Findings
+
+The post-QC results are described here without publishing unapproved tables or
+figures.
+
+- DGM-informed Cox models recovered much of the intended risk ranking in
+  predominantly additive proportional-hazards scenarios.
+- Individualised cumulative-incidence models improved substantially on the
+  non-individualised Aalen-Johansen baseline.
+- Relative performance depended on the stress scenario; no model family
+  dominated every setting.
+- Broader all-safe predictors were most relevant when signal was deliberately
+  distributed across regional MRI variables.
+- Canonical DeepSurv and DeepHit implementations produced finite probabilities
+  without using test data for training or tuning, but the study does not claim
+  that neural or classical models are universally superior.
+- These findings validate behaviour under the simulated mechanisms and
+  qualified truth targets only. Evaluation in authorised real data, followed
+  by external validation in an independent population, is required before any
+  clinical claim.
+
+## Installation
+
+Using pip:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Using conda:
+
+```bash
+conda env create -f environment.yml
+conda activate synthetic-carehome-competing-risk
+```
+
+The exact package versions used for the locked post-QC analyses are recorded in
+[`environment-lock-20260727.txt`](environment-lock-20260727.txt). This
+provenance record is not intended to replace the portable installation
+specifications above.
+
+The conda environment includes R, `survival`, and `cmprsk`, which are required
+for the Fine-Gray models. A pip-only installation does not install R; provide
+`Rscript` with those two R packages separately before running complete C4.
+
+The modelling scripts expect a local input directory named
+`fully_synthetic_stepC_v1/`. That directory is not distributed.
+
+## Running the Pipeline
+
+```bash
+python src/stepC_generator/stepC_quick_audits.py
+bash scripts/run_stepC2_debug.sh
+bash scripts/run_stepC2_full.sh
+bash scripts/run_stepC3_debug.sh
+bash scripts/run_stepC3_full.sh
+bash scripts/run_stepC4_debug.sh
+bash scripts/run_stepC4_full.sh
+bash scripts/run_stepC5A_exact_DGM_coefficients.sh
+bash scripts/run_stepC6_publication_analysis.sh
+```
+
+Full Step C4 execution is computationally intensive. For a new run, use
+`scripts/run_stepC4_full.sh`. The following scenario-sharded utility documents
+the post-QC migration used for this study: it requires an existing legacy C4
+result table, preserves four screened classical model entries, and reruns six
+specified entries by scenario.
+
+```bash
+python run_stepC4_postQC_sharded.py --max-workers 8
+```
+
+## Repository Structure
 
 ```text
 .
-├── README.md
-├── LICENSE
-├── requirements.txt
-├── environment.yml
 ├── docs/
+├── scripts/
 ├── src/
 │   ├── stepC_generator/
 │   ├── stepC2_model_comparison/
 │   ├── stepC3_competing_risk/
 │   ├── stepC4_extended_models/
-│   ├── stepC4A_calibration_audit/
-│   └── stepC5A_exact_DGM_coefficients/
-├── scripts/
-├── results_summary/
-└── tests/
+│   ├── stepC5A_exact_DGM_coefficients/
+│   └── stepC6_publication_analysis/
+├── tests/
+├── CODE_INDEX.md
+├── CITATION.cff
+├── environment-lock-20260727.txt
+├── environment.yml
+└── requirements.txt
 ```
 
-The root-level scripts are retained for backward compatibility. The organised
-source copies live under `src/`. See [CODE_INDEX.md](CODE_INDEX.md) for the
-complete code map.
+Root-level script copies are retained as direct command-line entry points. See
+[CODE_INDEX.md](CODE_INDEX.md) for the complete map.
 
-## Current QC Status
+The [analysis specification and deviations record](docs/14_analysis_specification_and_deviations.md)
+separates original requirements from later extensions and QC corrections. The
+[ADEMP/TRIPOD+AI-informed checklist](docs/15_reporting_checklist_ADEMP_TRIPODAI.md)
+tracks reporting completeness without treating a synthetic benchmark as a
+real-patient validation study.
 
-The code includes a strict QC patch for predictor filtering and export-safety
-parsing. Reference diagnosis columns such as
-`diagnosis_reference_NOT_PREDICTOR` are excluded by forbidden-name checks,
-removed predictor-block permission, and feature-dictionary role checks. Export
-safety audits now parse strings explicitly, so a value such as `"False"` is not
-treated as truthy.
+## Data and Result Release Policy
 
-The QC patch does not add models, change the DGM, or regenerate data. It only
-strengthens predictor leakage controls and safety-gate interpretation.
+Generated outputs are ignored by Git. No result table or figure will be added
+without explicit author review and approval. The current
+[`results_summary`](results_summary/README.md) directory contains only this
+policy statement.
 
-## Data Governance Statement
+The public generator documents the full probability mechanism but expects an
+authorised internal aggregate-summary source that is not included. The
+repository therefore supports methodological audit and re-implementation of
+the design, but it cannot independently reproduce the reported numerical
+results without the locked local synthetic package. SHA-256 manifests provide
+an internal evidence lock without distributing those files.
 
-This GitHub repository does not include:
+## Limitations
 
-- real SLAM patient-level data
-- Step B internal semi-synthetic SLAM data
-- raw CSV or Excel files
-- death-date or WMH spreadsheets
-- real identifiers or scan-level identifiers
-- large fully synthetic scenario datasets
-- per-person prediction files
-- fitted model binary files
-
-The repository includes only code, documentation, environment files, and small aggregate summary/audit tables from a fully synthetic local run. Real data must remain inside the authorised research environment.
-
-See [Data Governance and Export Safety](docs/08_data_governance_and_export_safety.md) for the detailed rules.
-
-## Quick Start
-
-Create an environment with either pip:
-
-```bash
-pip install -r requirements.txt
-```
-
-or conda:
-
-```bash
-conda env create -f environment.yml
-conda activate slam-synthetic-institutionalisation
-```
-
-The C2/C3 scripts expect a local data folder named `fully_synthetic_stepC_v1/`. That folder is not included in this repository.
-
-Run Step C2 in debug mode:
-
-```bash
-bash scripts/run_stepC2_debug.sh
-```
-
-Run Step C2 in full mode:
-
-```bash
-bash scripts/run_stepC2_full.sh
-```
-
-Run Step C3 in debug mode:
-
-```bash
-bash scripts/run_stepC3_debug.sh
-```
-
-Run Step C3 in full mode:
-
-```bash
-bash scripts/run_stepC3_full.sh
-```
-
-Run Step C4 in debug mode:
-
-```bash
-bash scripts/run_stepC4_debug.sh
-```
-
-Run Step C4A calibration audit:
-
-```bash
-bash scripts/run_stepC4A_calibration_audit.sh
-```
-
-Run Step C5A exact DGM coefficient export:
-
-```bash
-bash scripts/run_stepC5A_exact_DGM_coefficients.sh
-```
-
-If `fully_synthetic_stepC_v1/` is not present, the modelling scripts will not run. The tests do not run the full analyses.
-
-## Methods Summary
-
-The primary endpoint is time to care-home entry or institutionalisation. The outcome coding is:
-
-- `status = 0`: event-free or censored
-- `status = 1`: care-home entry, the event of interest
-- `status = 2`: death before care home, a competing event
-
-Step C2 performs cause-specific survival model comparison. It treats `status = 1` as the event and treats `status = 0` and `status = 2` as censored.
-
-Step C3 evaluates 5-year care-home cumulative incidence under competing risk. Death before care home is treated as a competing event. Death after care-home entry is a secondary post-care-home variable and is not the competing event for the primary endpoint.
-
-Step C4 extends the comparison with Fine-Gray, Random Survival Forest, and Gradient Boosting Survival models. A full C4 run has been completed locally. The committed C4 output files remain debug-level summaries only until the full tables and figures are explicitly reviewed and approved for upload.
-
-Step C4A audits the single C4 calibration-slope sanity flag. Step C5A exports
-the raw DGM coefficient tables from the fully synthetic generator and records
-which components cannot be exactly reconstructed from the current export.
-
-## Local Full-run Results Summary
-
-The following results describe one completed local full run on fully synthetic data. The underlying scenario datasets and per-person predictions are not included here.
-
-Step C2 completed 1,600 scenario-replicate-model evaluations:
-
-```text
-8 scenarios x 50 repetitions x 4 models = 1,600 rows
-Failures = 0
-```
-
-Best fitted Step C2 model by mean Harrell C-index:
-
-| Scenario | Best fitted model | Mean C-index |
-| --- | --- | ---: |
-| S0_linear_PH_inst30 | cox_dgm_features | 0.6968 |
-| S1_linear_PH_inst15 | cox_dgm_features | 0.6919 |
-| S2_linear_PH_inst45 | cox_dgm_features | 0.6933 |
-| S3_nonlinear_interaction_inst30 | cox_dgm_features | 0.7329 |
-| S4_nonPH_inst30 | cox_dgm_features | 0.6900 |
-| S5_MAR_missingness_inst30 | cox_dgm_features | 0.6897 |
-| S6_highdim_sparseMRI_inst30 | penalised_cox_all_safe_predictors | 0.7097 |
-| S7_strong_death_competing_inst30 | cox_dgm_features | 0.6925 |
-
-Step C3 completed 1,600 mandatory competing-risk evaluations:
-
-```text
-8 scenarios x 50 repetitions x 4 main models = 1,600 rows
-Failures = 0
-Oracle sanity flags = 0
-```
-
-Best fitted Step C3 model by mean 5-year risk MAE against the exported synthetic true risk:
-
-| Scenario | Best fitted model | MAE | Brier | AUC | Calibration slope |
-| --- | --- | ---: | ---: | ---: | ---: |
-| S0_linear_PH_inst30 | cs_cox_dgm_cif | 0.0371 | 0.1912 | 0.6860 | 0.9483 |
-| S1_linear_PH_inst15 | cs_cox_dgm_cif | 0.0271 | 0.1217 | 0.6668 | 0.8879 |
-| S2_linear_PH_inst45 | cs_cox_dgm_cif | 0.0401 | 0.2200 | 0.6929 | 0.9498 |
-| S3_nonlinear_interaction_inst30 | cs_cox_dgm_cif | 0.0525 | 0.1808 | 0.7252 | 0.9118 |
-| S4_nonPH_inst30 | cs_cox_dgm_cif | 0.0499 | 0.1950 | 0.6668 | 0.8777 |
-| S5_MAR_missingness_inst30 | cs_cox_dgm_cif | 0.0402 | 0.1930 | 0.6770 | 0.9098 |
-| S6_highdim_sparseMRI_inst30 | cs_penalised_cox_all_safe_cif | 0.0456 | 0.1834 | 0.7175 | 0.8793 |
-| S7_strong_death_competing_inst30 | cs_cox_dgm_cif | 0.0367 | 0.1940 | 0.6711 | 0.9334 |
-
-Across scenarios, the fitted-model family selected by C2 discrimination and C3 absolute-risk accuracy agreed in 8 of 8 scenarios after mapping the cause-specific model families. In S7, the stronger death competing-risk scenario, the best C3 fitted model had mean MAE 0.0367 compared with 0.1088 for the Aalen-Johansen null baseline.
-
-Step C4 full run completed all eight scenarios with 50 repetitions per scenario:
-
-```text
-8 scenarios x 50 repetitions x 10 model entries = 4,000 rows
-Model failures = 0
-Model skips = 0
-Fine-Gray = completed
-RSF = completed
-GBSA = completed
-DeepSurv = completed
-DeepHit = completed
-full_run_passed = True
-publication_ready = False pending review of oracle-sanity calibration/risk-distribution flags
-```
-
-The C4 full run does not overturn the C2/C3 core interpretation. Fine-Gray, RSF, GBSA, DeepSurv, and DeepHit completed under the strict synthetic-only leakage guard. The deep models were implemented as deterministic NumPy neural-network baselines after the local `pycox`/`torchtuples` training path proved unstable at native runtime level. The updated C4 run has no failed or skipped model fits, but the oracle-sanity audit is not fully clean because several deep-model calibration and risk-distribution checks require review. Full C4 tables and figures remain local pending explicit review.
-
-Step C4A resolved this as calibration instability for `cs_gbsa_dgm_cif` in the
-low-institutionalisation S1 scenario, not leakage or oracle outperformance.
-After adding DeepSurv and DeepHit, C4A should be rerun before using C4 as a
-publication-ready claim, because the deep-model oracle-sanity flags are newer
-than the existing C4A calibration audit.
-
-Step C5A exported exact raw pre-rescaling DGM coefficients locally. The bounded
-true-LP reconstruction audit passed the Spearman >= 0.999 criterion for all
-audited scenario-repetitions except S3, where the generator includes a
-non-exported latent frailty-by-vascular interaction term.
-
-## Scientific Interpretation
-
-These are synthetic benchmark results, not real clinical performance estimates. The main interpretation is that a carefully specified Cox model is robust across most simulated settings, while the high-dimensional sparse MRI scenario is the clearest case where the all-safe penalised Cox model performs best. XGBoost did not unrealistically exceed the oracle benchmark, supporting the strict leakage guard.
-
-## Documentation
-
-- [Project overview](docs/00_project_overview.md)
-- [Research rationale](docs/01_research_rationale.md)
-- [Workflow from SLAM to synthetic evaluation](docs/02_workflow_from_SLAM_to_synthetic.md)
-- [Internal Step B semi-synthetic stage](docs/03_stepB_internal_semi_synthetic.md)
-- [Step C fully synthetic generator](docs/04_stepC_fully_synthetic_generator.md)
-- [Step C2 model comparison](docs/05_stepC2_model_comparison.md)
-- [Step C3 competing-risk evaluation](docs/06_stepC3_competing_risk_evaluation.md)
-- [Results summary](docs/07_results_summary.md)
-- [Data governance and export safety](docs/08_data_governance_and_export_safety.md)
-- [Limitations and next steps](docs/09_limitations_and_next_steps.md)
-- [Reproducibility guide](docs/10_github_reproducibility_guide.md)
-- [Step C4 extended model comparison](docs/11_stepC4_extended_model_comparison.md)
-- [Step C4A calibration-slope audit](docs/12_stepC4A_calibration_audit.md)
-- [Step C5A exact DGM coefficients](docs/13_stepC5A_exact_DGM_coefficients.md)
-- [Code index](CODE_INDEX.md)
-
-## Future Work
-
-- Apply the pipeline to real care-home outcomes when they become available.
-- Add a formal Fine-Gray implementation.
-- Add IPCW Brier scores and time-dependent AUC.
-- Evaluate multiple horizons, for example 1, 3, and 5 years.
-- Export repetition-level raw-LP moments in a future Step C version so final
-  effective DGM coefficients can be reconstructed numerically, not only as raw
-  pre-rescaling coefficients.
-- Run sensitivity analyses for the post-care-home death-hazard multiplier.
+- The benchmark cannot establish clinical transportability, fairness, or
+  utility.
+- Functional dependency, caregiver availability, living arrangements, and
+  access to social-care services were not simulated, although they may be
+  important determinants of real care-home entry.
+- The generator is informed by broad aggregate characteristics and does not
+  reproduce a real empirical covariance matrix.
+- The authorised aggregate-summary source and individual synthetic package are
+  not public, so the code-only release does not provide independent numerical
+  reproduction of the manuscript results.
+- Most scenarios retain substantial additive structure.
+- Model-development budgets are not identical across every family.
+- The design uses one sample size and one five-year horizon.
+- Marginal care-home rates are tightly calibrated design quantities.
+- S4 does not contain an exact exported individual CIF or full time-varying
+  oracle LP; its truth-based metrics are proxy analyses.
+- `MAR-lite` is not strict observed-data MAR because unexported latent factors
+  also drive missingness.
 
 ## License
 
-This code is released under the MIT License. See [LICENSE](LICENSE).
+The code is released under the [MIT License](LICENSE).

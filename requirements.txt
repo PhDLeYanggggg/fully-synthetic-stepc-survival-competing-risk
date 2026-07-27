@@ -6,7 +6,13 @@ scikit-survival
 lifelines
 xgboost
 matplotlib
+torch
+pycox==0.3.0
+torchtuples==0.2.2
 openpyxl
 xlsxwriter
 jupyter
 pytest
+
+# The Fine-Gray stage also requires an external R installation with the
+# survival and cmprsk packages. Use environment.yml for a complete environment.

@@ -17,10 +17,15 @@ inputs/
 
 # Generated outputs are intentionally not versioned.
 fully_synthetic_stepC2_model_comparison/
+fully_synthetic_stepC2_model_comparison_postQC*/
 fully_synthetic_stepC3_competing_risk_evaluation/
+fully_synthetic_stepC3_competing_risk_evaluation_postQC*/
 fully_synthetic_stepC4_extended_models/
+fully_synthetic_stepC4_extended_models_postQC*/
+fully_synthetic_stepC4_postQC_shards/
 fully_synthetic_stepC4_calibration_audit/
 fully_synthetic_stepC5A_exact_DGM_coefficients/
+fully_synthetic_stepC6_publication_analysis/
 tables/
 figures/
 predictions/
@@ -40,6 +45,7 @@ WMH.csv
 *Scan_Date*
 
 # Internal SLAM/semi-synthetic folders.
+stepC_internal_source_summary_DO_NOT_EXPORT/
 slam_inst_sim_v0/
 slam_inst_sim_v0_step2_step3_auto*/
 StepB*/
@@ -71,18 +77,18 @@ fully_synthetic_stepC_v1/scenario_datasets/*.csv.gz
 *.pkl
 *.joblib
 
-# Allow curated aggregate summary tables committed under results_summary/.
-!results_summary/
-!results_summary/**/
-!results_summary/**/*.csv
-
 # Generated figures/reports.
 *.png
 *.jpg
 *.jpeg
+*.svg
 *.tif
 *.tiff
 *.pdf
+*.doc
+*.docx
+*.ppt
+*.pptx
 
 # Transfer packages.
 transfer_packages/

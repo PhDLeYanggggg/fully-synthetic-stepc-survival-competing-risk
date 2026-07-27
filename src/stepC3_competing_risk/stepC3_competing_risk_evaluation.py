@@ -1,39 +1,12 @@
 #!/usr/bin/env python3
-"""Step C3 fully synthetic competing-risk 5-year risk evaluation.
+"""Step C3 competing-risk-specific evaluation on fully synthetic Step C data.
 
-Inputs
-------
-Expected local input directory: ``fully_synthetic_stepC_v1/``. The script can
-also reuse C2 predictor-list outputs from
-``fully_synthetic_stepC2_model_comparison/`` when available.
+This script uses only:
+  - fully_synthetic_stepC_v1/
+  - fully_synthetic_stepC2_model_comparison/ predictor-list outputs, if present
 
-Outputs
--------
-Writes aggregate competing-risk performance tables, calibration summaries,
-audits, plots, and optional debug prediction samples to
-``fully_synthetic_stepC3_competing_risk_evaluation/``.
-
-Data governance
----------------
-This script uses exportable fully synthetic Step C files only. It does not use
-real SLAM data, internal Step B semi-synthetic data, raw spreadsheets, or real
-patient identifiers.
-
-Run
----
-Debug mode: ``python src/stepC3_competing_risk/stepC3_competing_risk_evaluation.py --debug``.
-Full mode: ``python src/stepC3_competing_risk/stepC3_competing_risk_evaluation.py --full``.
-
-Models
-------
-Oracle synthetic risk benchmark, Aalen-Johansen null, DGM-feature
-cause-specific Cox CIF, and strict all-safe penalised cause-specific Cox CIF.
-Fine-Gray is optional and requires R package ``cmprsk``.
-
-Notes
------
-For C3, status=1 is care-home entry and status=2 is death before care home as
-the competing event. The default horizon is 5 years.
+It evaluates 5-year care-home cumulative incidence risk while treating
+death before care home (status=2) as a competing event.
 """
 
 from __future__ import annotations
@@ -41,8 +14,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import shutil
-import subprocess
 import sys
 import time
 import traceback
@@ -78,7 +49,6 @@ MODEL_ORACLE = "oracle_true_risk_not_a_model"
 MODEL_AJ = "nonparametric_aj_null"
 MODEL_CS_DGM = "cs_cox_dgm_cif"
 MODEL_CS_SAFE = "cs_penalised_cox_all_safe_cif"
-MODEL_FINEGRAY = "finegray_dgm_optional"
 MANDATORY_MODELS = [MODEL_ORACLE, MODEL_AJ, MODEL_CS_DGM, MODEL_CS_SAFE]
 
 REQUIRED_COLUMNS = [
@@ -198,7 +168,7 @@ SCENARIO_MEANINGS = {
     "S2_linear_PH_inst45": "high-event scenario",
     "S3_nonlinear_interaction_inst30": "nonlinear + interaction scenario",
     "S4_nonPH_inst30": "non-proportional hazards scenario",
-    "S5_MAR_missingness_inst30": "MAR missingness scenario",
+    "S5_MAR_missingness_inst30": "stronger MAR-lite structured missingness scenario",
     "S6_highdim_sparseMRI_inst30": "high-dimensional sparse MRI signal scenario",
     "S7_strong_death_competing_inst30": "stronger death competing risk scenario",
 }
@@ -355,6 +325,10 @@ def parse_safe_bool(x: Any) -> bool:
 def bool_series_all_true(series: pd.Series) -> bool:
     values = series.map(parse_safe_bool)
     return bool(values.all())
+
+
+def parse_bool_series(series: pd.Series) -> pd.Series:
+    return series.map(parse_safe_bool)
 
 
 def read_csv_required(path: Path) -> pd.DataFrame:
@@ -943,7 +917,7 @@ def calibration_intercept_slope(observed: np.ndarray, pred: np.ndarray) -> Tuple
     if np.unique(x).size < 2:
         return np.nan, np.nan, "predicted_risk_has_no_variation"
     try:
-        model = LogisticRegression(penalty="none", solver="lbfgs", max_iter=1000)
+        model = LogisticRegression(penalty=None, solver="lbfgs", max_iter=1000)
         model.fit(x, y)
         return float(model.intercept_[0]), float(model.coef_[0][0]), ""
     except Exception as exc:
@@ -1157,7 +1131,7 @@ def skip_keys_from_performance(perf: pd.DataFrame, rerun_failed: bool) -> set[Tu
     if perf.empty:
         return set()
     if rerun_failed:
-        to_skip = perf.loc[~perf["failed"].astype(bool)].copy()
+        to_skip = perf.loc[~parse_bool_series(perf["failed"])].copy()
     else:
         to_skip = perf.copy()
     return {result_key(row.scenario_id, row.replicate_id, row.model) for row in to_skip.itertuples(index=False)}
@@ -1185,7 +1159,10 @@ def save_failure_log(perf: pd.DataFrame, paths: Dict[str, Path]) -> None:
         "n_event1_test",
         "n_event2_test",
     ]
-    failures = perf.loc[perf["failed"].astype(bool), [c for c in cols if c in perf.columns]]
+    failures = perf.loc[
+        parse_bool_series(perf["failed"]),
+        [c for c in cols if c in perf.columns],
+    ]
     failures.to_csv(paths["tables"] / "failure_log.csv", index=False)
 
 
@@ -1389,7 +1366,7 @@ def process_scenario_file(
             skip_keys.add(key)
             perf = save_checkpoint(result_rows, calibration_rows, paths)
             print(
-                f"    saved checkpoint: rows={len(perf)} failures={int(perf['failed'].astype(bool).sum())}",
+                f"    saved checkpoint: rows={len(perf)} failures={int(parse_bool_series(perf['failed']).sum())}",
                 flush=True,
             )
     del scenario_df
@@ -1443,13 +1420,14 @@ def aggregate_results(perf: pd.DataFrame, paths: Dict[str, Path]) -> pd.DataFram
     ]
     rows: List[Dict[str, Any]] = []
     for (scenario_id, model), group in perf.groupby(["scenario_id", "model"], sort=True):
-        success = group.loc[~group["failed"].astype(bool)].copy()
+        failed = parse_bool_series(group["failed"])
+        success = group.loc[~failed].copy()
         row: Dict[str, Any] = {
             "scenario_id": scenario_id,
             "model": model,
             "n_successful_reps": int(len(success)),
-            "n_failed_reps": int(group["failed"].astype(bool).sum()),
-            "failure_rate": float(group["failed"].astype(bool).mean()) if len(group) else np.nan,
+            "n_failed_reps": int(failed.sum()),
+            "failure_rate": float(failed.mean()) if len(group) else np.nan,
         }
         for metric in metric_cols:
             stats = metric_stats(success[metric] if metric in success.columns else pd.Series(dtype=float))
@@ -1598,48 +1576,14 @@ def create_best_model_table(summary: pd.DataFrame, paths: Dict[str, Path]) -> pd
 
 
 def check_finegray_optional(paths: Dict[str, Path]) -> pd.DataFrame:
-    r_script = Path("stepC3_finegray_optional.R")
-    r_script.write_text(
-        "\n".join(
-            [
-                "# Optional Fine-Gray placeholder for Step C3.",
-                "# The Python pipeline checks Rscript and cmprsk availability.",
-                "# A production version can call cmprsk::crr and export 5-year CIF predictions.",
-                "if (!requireNamespace('cmprsk', quietly = TRUE)) {",
-                "  stop('cmprsk is not installed')",
-                "}",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    rscript = shutil.which("Rscript")
-    available = False
-    reason = ""
-    if rscript is None:
-        reason = "Rscript_not_found"
-    else:
-        try:
-            proc = subprocess.run(
-                [rscript, "-e", "if (!requireNamespace('cmprsk', quietly=TRUE)) quit(status=2)"],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            if proc.returncode == 0:
-                available = True
-                reason = "cmprsk_available_but_prediction_not_implemented_in_C3_v1"
-            else:
-                reason = "cmprsk_not_installed_or_failed"
-        except Exception as exc:
-            reason = f"{type(exc).__name__}: {exc}"
     out = pd.DataFrame(
         [
             {
-                "finegray_available": available,
+                "finegray_available": np.nan,
                 "finegray_ran": False,
-                "finegray_failure_reason": reason,
-                "optional_status": "skipped_optional_not_part_of_mandatory_C3_v1",
-                "r_script_path": str(r_script),
+                "finegray_failure_reason": "",
+                "optional_status": "outside_C3_scope_evaluated_in_C4",
+                "r_script_path": "",
             }
         ]
     )
@@ -1662,20 +1606,28 @@ def create_full_run_sanity_checks(
     oracle_audit: pd.DataFrame,
     paths: Dict[str, Path],
 ) -> pd.DataFrame:
-    expected_reps = 2 if config.debug_mode else 50
+    expected_reps = 50
     expected_rows = 8 * expected_reps * len(MANDATORY_MODELS)
+    publication_full_mode = (
+        not config.debug_mode and config.max_reps_per_scenario is None
+    )
     observed_rows = int(len(perf))
     observed_scenarios = int(perf["scenario_id"].nunique()) if not perf.empty else 0
     reps_by_scenario = perf.groupby("scenario_id")["replicate_id"].nunique() if not perf.empty else pd.Series(dtype=int)
     observed_min_reps = int(reps_by_scenario.min()) if not reps_by_scenario.empty else 0
     observed_max_reps = int(reps_by_scenario.max()) if not reps_by_scenario.empty else 0
-    failures = int(perf["failed"].astype(bool).sum()) if not perf.empty else 0
+    failures = int(parse_bool_series(perf["failed"]).sum()) if not perf.empty else 0
     export_safety = bool_series_all_true(safety["safe_to_export_column_names"])
     forbidden = any_forbidden_predictor_flag(paths)
-    oracle_flag = bool(oracle_audit["needs_audit"].astype(bool).any()) if not oracle_audit.empty else True
+    oracle_flag = (
+        bool(parse_bool_series(oracle_audit["needs_audit"]).any())
+        if not oracle_audit.empty
+        else True
+    )
     failure_rate_ok = observed_rows > 0 and failures / observed_rows <= 0.05
     full_pass = (
-        observed_rows == expected_rows
+        publication_full_mode
+        and observed_rows == expected_rows
         and observed_scenarios == 8
         and observed_min_reps == expected_reps
         and observed_max_reps == expected_reps
@@ -1685,6 +1637,7 @@ def create_full_run_sanity_checks(
         and failure_rate_ok
     )
     rows = [
+        ("publication_full_mode", True, publication_full_mode, publication_full_mode),
         ("expected_replicate_model_rows", expected_rows, expected_rows, True),
         ("observed_replicate_model_rows", expected_rows, observed_rows, observed_rows == expected_rows),
         ("expected_scenarios", 8, 8, True),
@@ -1734,7 +1687,7 @@ def make_figures(summary: pd.DataFrame, diff: pd.DataFrame, calibration_summary:
     specs = [
         ("risk5_mae_vs_true_risk_mean", "Mean MAE vs true risk", "5-year risk MAE by scenario and model", "risk5_mae_by_scenario_model.png"),
         ("risk5_rmse_vs_true_risk_mean", "Mean RMSE vs true risk", "5-year risk RMSE by scenario and model", "risk5_rmse_by_scenario_model.png"),
-        ("brier_5y_naive_mean", "Mean naive Brier", "Naive 5-year Brier by scenario and model", "brier_5y_by_scenario_model.png"),
+        ("brier_5y_naive_mean", "Mean observed-status Brier", "Observed-status 5-year Brier by scenario and model", "brier_5y_by_scenario_model.png"),
         ("auc_5y_observed_event1_mean", "Mean observed 5-year AUC", "Observed 5-year AUC by scenario and model", "auc5_by_scenario_model.png"),
         ("calibration_slope_5y_mean", "Mean calibration slope", "5-year calibration slope by scenario and model", "calibration_slope_by_scenario_model.png"),
     ]
@@ -1801,13 +1754,16 @@ def write_readme(
     finished_at: datetime,
 ) -> None:
     n_rows = int(len(perf))
-    n_fail = int(perf["failed"].astype(bool).sum()) if not perf.empty else 0
+    n_fail = int(parse_bool_series(perf["failed"]).sum()) if not perf.empty else 0
     full_pass = False
     rows = sanity.loc[sanity["check_name"] == "full_run_passed"] if not sanity.empty else pd.DataFrame()
     if not rows.empty:
-        full_pass = bool(rows.iloc[0]["observed"])
-    fine_reason = finegray_status["finegray_failure_reason"].iloc[0] if not finegray_status.empty else "not_checked"
-    any_oracle_flag = bool(oracle_audit["needs_audit"].astype(bool).any()) if not oracle_audit.empty else True
+        full_pass = parse_safe_bool(rows.iloc[0]["observed"])
+    any_oracle_flag = (
+        bool(parse_bool_series(oracle_audit["needs_audit"]).any())
+        if not oracle_audit.empty
+        else True
+    )
     best_lookup = best.set_index("scenario_id").to_dict("index") if not best.empty else {}
 
     def best_model(s: str) -> str:
@@ -1868,23 +1824,27 @@ def write_readme(
         f"Run started: {started_at.isoformat(timespec='seconds')}",
         f"Run finished: {finished_at.isoformat(timespec='seconds')}",
         "",
-        "## Aim",
+        "## Purpose",
         "",
-        "C3 extends C2 by moving from cause-specific ranking/model comparison to 5-year absolute-risk evaluation under competing risk. C3 treats `status=2` death before care home as a competing event and reconstructs the care-home cumulative incidence function using cause-specific Cox models.",
+        "C3 extends the cause-specific ranking comparison in C2 to five-year "
+        "absolute-risk evaluation under competing mortality. Death before "
+        "care-home entry (`status=2`) is modelled as the competing event, and "
+        "paired cause-specific Cox hazards are used to reconstruct the "
+        "care-home cumulative incidence function.",
         "",
         "## Data Source",
         "",
         "- Uses only `fully_synthetic_stepC_v1/`.",
-        "- Optionally reads predictor lists saved by C2.",
-        "- Does not use real SLAM data.",
-        "- Does not use Step B data.",
-        "- Does not use raw CSV files, death spreadsheets, or WMH spreadsheets.",
+        "- May read the predictor lists saved by C2.",
+        "- Uses no real SLaM data, Step B data, death spreadsheets, WMH "
+        "spreadsheets, or other raw clinical files.",
         "",
-        "## Endpoint Definition",
+        "## Outcome Definition",
         "",
-        "- `status=1` is care-home entry / institutionalisation.",
-        "- `status=2` is death before care home as the competing event.",
-        "- `death_after_carehome` is not the competing event for the primary endpoint.",
+        "- `status=1` is care-home entry or institutionalisation.",
+        "- `status=2` is death before care-home entry, the competing event.",
+        "- `death_after_carehome` is not the competing event for the primary "
+        "endpoint.",
         f"- Horizon: `{config.horizon_years}` years.",
         "",
         "## Models",
@@ -1893,26 +1853,26 @@ def write_readme(
         "- `nonparametric_aj_null`",
         "- `cs_cox_dgm_cif`",
         "- `cs_penalised_cox_all_safe_cif`",
-        f"- `finegray_dgm_optional`: skipped/optional; reason = `{fine_reason}`",
+        "- Fine-Gray is outside the specified four-entry C3 comparison and is evaluated in C4.",
         "",
         "## Metrics",
         "",
-        "- MAE/RMSE versus true synthetic 5-year risk.",
-        "- Naive Brier score at 5 years.",
-        "- Observed 5-year AUC.",
-        "- Calibration slope/intercept.",
+        "- MAE and RMSE versus the exported synthetic five-year target.",
+        "- Fully observed-status Brier score at five years.",
+        "- Binary observed-status five-year AUC.",
+        "- Calibration intercept and slope.",
         "- Calibration deciles.",
-        "- Cause-specific C-index as a continuity metric with C2.",
+        "- Cause-specific C-index as a secondary bridge to C2.",
         "",
         "## Main Results",
         "",
         f"- replicate-level rows: {n_rows}; failures: {n_fail}; full_run_passed: {full_pass}.",
-        f"- In S0/S1/S2, the best non-oracle models were `{best_model('S0_linear_PH_inst30')}`, `{best_model('S1_linear_PH_inst15')}`, and `{best_model('S2_linear_PH_inst45')}`.",
-        f"- In S6 high-dimensional sparse MRI, the best non-oracle model was `{best_model('S6_highdim_sparseMRI_inst30')}`.",
-        f"- In S7 strong death competing risk, the best non-oracle model was `{best_model('S7_strong_death_competing_inst30')}`. {s7_competing_text}",
-        f"- Any model exceeded the oracle unexpectedly: {any_oracle_flag}.",
-        f"- Fine-Gray ran successfully: {bool(finegray_status['finegray_ran'].iloc[0]) if not finegray_status.empty else False}; status is recorded in `tables/finegray_optional_status.csv`.",
-        f"- C3/C2 conclusion consistency: {c2_consistency}",
+        f"- Best non-oracle models in S0/S1/S2: `{best_model('S0_linear_PH_inst30')}`, `{best_model('S1_linear_PH_inst15')}`, and `{best_model('S2_linear_PH_inst45')}`.",
+        f"- Best non-oracle model in S6 high-dimensional sparse MRI: `{best_model('S6_highdim_sparseMRI_inst30')}`.",
+        f"- Best non-oracle model in S7 strong competing mortality: `{best_model('S7_strong_death_competing_inst30')}`. {s7_competing_text}",
+        f"- Any model flagged for implausible oracle outperformance: {any_oracle_flag}.",
+        "- Fine-Gray is outside the four-entry C3 scope; its complete comparison is reported in C4.",
+        f"- Consistency with C2: {c2_consistency}",
         "",
         "## Best Model Table",
         "",
@@ -1933,17 +1893,24 @@ def write_readme(
         "",
         "## Limitations",
         "",
-        "- The data are fully synthetic and intended for methodological testing, not clinical inference.",
-        "- Fine-Gray status is explicitly logged when the optional model does not run.",
-        "- The naive Brier score is not an IPCW Brier score.",
-        "- This first C3 version focuses on 5-year risk rather than fully dynamic risk over time.",
-        "- Cox DGM still uses a fallback predictor list unless exact DGM coefficients have been exported.",
+        "- The data are fully synthetic and support methods testing, not "
+        "clinical inference.",
+        "- Fine-Gray is deliberately outside C3 and is evaluated in C4.",
+        "- The horizon-specific Brier score is a fully observed binary-endpoint "
+        "metric under five-year administrative follow-up; it is not a generic "
+        "single-event IPCW score.",
+        "- C3 evaluates a fixed five-year horizon rather than the complete "
+        "time-varying risk trajectory.",
+        "- The DGM-informed Cox model uses a fixed observable proxy set, not "
+        "the latent variables, true coefficients, or exact algebraic DGM.",
         "",
-        "## Suggested Next Steps",
+        "## Next Steps",
         "",
-        "- Prepare a supervisor-facing summary if C3 passes.",
-        "- Optional C4: implement IPCW Brier score, time-dependent AUC, and a formal Fine-Gray pipeline.",
-        "- Optional Step C generator improvement: export exact DGM predictor coefficients.",
+        "- Use C4 for the extended classical and canonical neural-model "
+        "comparison.",
+        "- Use C5A for coefficient-source and DGM-reconstruction audits.",
+        "- Use C6 for paired comparisons, Monte Carlo uncertainty, calibration "
+        "summaries, and publication tables.",
         "",
     ]
     (paths["root"] / "README_stepC3_competing_risk_evaluation.md").write_text(
@@ -2012,9 +1979,15 @@ def main() -> None:
     write_readme(config, paths, perf, summary, best, oracle_audit, sanity, finegray_status, started_at, finished_at)
 
     total_runtime = time.perf_counter() - start_perf
-    failure_count = int(perf["failed"].astype(bool).sum()) if not perf.empty else 0
+    failure_count = (
+        int(parse_bool_series(perf["failed"]).sum()) if not perf.empty else 0
+    )
     full_pass_row = sanity.loc[sanity["check_name"] == "full_run_passed"]
-    full_pass = bool(full_pass_row.iloc[0]["observed"]) if not full_pass_row.empty else False
+    full_pass = (
+        parse_safe_bool(full_pass_row.iloc[0]["observed"])
+        if not full_pass_row.empty
+        else False
+    )
     print("Done.", flush=True)
     print(f"mode: {'debug' if config.debug_mode else 'full'}", flush=True)
     print(f"total runtime seconds: {total_runtime:.1f}", flush=True)

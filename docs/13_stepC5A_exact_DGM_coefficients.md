@@ -1,9 +1,10 @@
 # Step C5A Exact DGM Coefficients
 
 Step C5A exports the raw data-generating-mechanism coefficients from the fully
-synthetic Step C generator. It addresses a methodological limitation in earlier
-C2/C3/C4 documentation: DGM-feature models previously relied on fallback
-predictor lists because exact DGM coefficients had not yet been exported.
+synthetic Step C generator. It separates the exact raw simulation terms from
+the fixed 36-variable observable DGM-informed proxy set used in C2/C3/C4.
+C5A improves generator transparency; it does not retrospectively redefine
+those fitted models as exact algebraic DGM models.
 
 ## Script
 
@@ -19,7 +20,10 @@ bash scripts/run_stepC5A_exact_DGM_coefficients.sh
 
 ## Expected Local Inputs
 
-- `code/stepC_fully_synthetic_exportable_generator_v1.ipynb`
+- one generator source:
+  `code/stepC_fully_synthetic_exportable_generator_v1.ipynb`, when available
+  internally, or
+  `src/stepC_generator/stepC_fully_synthetic_exportable_generator_v1.py`
 - `fully_synthetic_stepC_v1/tables/dgm_definition_table.csv`
 - `fully_synthetic_stepC_v1/tables/feature_dictionary.csv`
 - `fully_synthetic_stepC_v1/tables/scenario_summary.csv`

@@ -11,6 +11,10 @@ git diff --cached --name-only
 git diff --cached --stat
 ```
 
-Do not commit real SLAM data, internal semi-synthetic data, raw spreadsheets, large scenario datasets, per-person predictions, fitted binary models, or files containing real identifiers.
+Do not commit real SLAM data, internal semi-synthetic data, raw spreadsheets,
+synthetic scenario datasets, per-person predictions, fitted binary models,
+result tables, figures, or files containing real identifiers.
 
-Small aggregate summary tables may be committed under `results_summary/` when they contain no patient-level records.
+An aggregate result table or figure may be added only after the repository
+owner has reviewed and explicitly approved that specific artifact. Approval is
+not inferred from approval of code, documentation, or a different artifact.

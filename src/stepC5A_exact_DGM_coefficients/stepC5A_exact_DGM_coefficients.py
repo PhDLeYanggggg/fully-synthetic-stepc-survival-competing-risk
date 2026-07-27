@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Step C5A: export exact DGM coefficients from the fully synthetic generator.
 
-This script reads only the Step C generator notebook, exported fully synthetic
-summary tables, and small bounded samples from fully synthetic scenario files
-for a true-LP reconstruction audit. It does not read real SLAM data, Step B
-data, raw Excel files, or full per-person predictions.
+This script reads only an available Step C generator source (the original
+notebook or its public Python export), exported fully synthetic summary tables,
+and small bounded samples from fully synthetic scenario files for a true-LP
+reconstruction audit. It does not read real SLAM data, Step B data, raw Excel
+files, or full per-person predictions.
 """
 
 from __future__ import annotations
@@ -22,6 +23,9 @@ DATA_DIR = Path("fully_synthetic_stepC_v1")
 SCENARIO_DIR = DATA_DIR / "scenario_datasets"
 TABLE_DIR = DATA_DIR / "tables"
 GENERATOR_NOTEBOOK = Path("code/stepC_fully_synthetic_exportable_generator_v1.ipynb")
+GENERATOR_PYTHON = Path(
+    "src/stepC_generator/stepC_fully_synthetic_exportable_generator_v1.py"
+)
 OUT_DIR = Path("fully_synthetic_stepC5A_exact_DGM_coefficients")
 
 MAX_REPS_PER_SCENARIO_AUDIT = 2
@@ -214,12 +218,38 @@ def require_file(path: Path) -> Path:
     return path
 
 
+def load_generator_source() -> Tuple[Path, str, str]:
+    if GENERATOR_NOTEBOOK.exists():
+        notebook = json.loads(GENERATOR_NOTEBOOK.read_text(encoding="utf-8"))
+        code_cells = [
+            "".join(cell.get("source", []))
+            for cell in notebook.get("cells", [])
+            if cell.get("cell_type") == "code"
+        ]
+        return (
+            GENERATOR_NOTEBOOK,
+            "\n".join(code_cells),
+            f"Notebook source with {len(code_cells)} code cells.",
+        )
+    if GENERATOR_PYTHON.exists():
+        source = GENERATOR_PYTHON.read_text(encoding="utf-8")
+        return (
+            GENERATOR_PYTHON,
+            source,
+            f"Python generator source with {len(source.splitlines())} lines.",
+        )
+    raise FileNotFoundError(
+        "No Step C generator source found. Expected either "
+        f"{GENERATOR_NOTEBOOK} or {GENERATOR_PYTHON}."
+    )
+
+
 def parse_safe_bool(x: object) -> bool:
     return str(x).strip().lower() in {"true", "1", "yes"}
 
 
 def load_inputs() -> Dict[str, pd.DataFrame]:
-    require_file(GENERATOR_NOTEBOOK)
+    load_generator_source()
     audit_path = DATA_DIR / "audit" / "export_safety_audit.csv"
     if audit_path.exists():
         audit = pd.read_csv(audit_path)
@@ -445,76 +475,84 @@ def build_scenario_summary(dgm: pd.DataFrame, scenario_summary: pd.DataFrame) ->
 
 
 def build_code_location_audit() -> pd.DataFrame:
-    nb = json.loads(require_file(GENERATOR_NOTEBOOK).read_text())
-    code_cell_count = sum(1 for c in nb.get("cells", []) if c.get("cell_type") == "code")
-    source_note = f"Notebook contains {code_cell_count} code cells; no src/stepC_generator Python source is present in this export root."
-    rows = [
-        {
-            "component": "scenario definitions",
-            "found": True,
-            "source_file": str(GENERATOR_NOTEBOOK),
-            "function_or_cell_name": "code cell 5 / SCENARIOS",
-            "line_or_description": "lines 3-100 define S0-S7 target rates, lp_sd, nonlinearity, non-PH, sparse MRI, and missingness switches",
-            "notes": source_note,
-        },
-        {
-            "component": "care home DGM linear LP",
-            "found": True,
-            "source_file": str(GENERATOR_NOTEBOOK),
-            "function_or_cell_name": "code cell 13 / build_lp_components",
-            "line_or_description": "lines 17-50 construct baseline care-home LP and rescale to scenario lp_sd",
-            "notes": "true_lp_carehome is exported from comps['lp_inst'] in generate_outcomes.",
-        },
-        {
-            "component": "death-before-carehome DGM",
-            "found": True,
-            "source_file": str(GENERATOR_NOTEBOOK),
-            "function_or_cell_name": "code cell 13 / build_lp_components and generate_outcomes",
-            "line_or_description": "lines 62-71 build death LP; lines 98-114 calibrate latent death base rate",
-            "notes": "S7 changes latent death target, not death LP coefficients.",
-        },
-        {
-            "component": "post-carehome death DGM",
-            "found": True,
-            "source_file": str(GENERATOR_NOTEBOOK),
-            "function_or_cell_name": "code cell 13 / generate_outcomes",
-            "line_or_description": "lines 148-155 apply post-carehome death hazard multiplier to community death hazard",
-            "notes": "The multiplier is a state-risk / frailty-state assumption, not a causal claim.",
-        },
-        {
-            "component": "nonlinear and interaction DGM",
-            "found": True,
-            "source_file": str(GENERATOR_NOTEBOOK),
-            "function_or_cell_name": "code cell 13 / build_lp_components",
-            "line_or_description": "lines 31-39 add S3 threshold, observed-feature interaction, and latent frailty-vascular interaction terms",
-            "notes": "Latent frailty and vascular factors are not exported, so reconstruction is incomplete for S3.",
-        },
-        {
-            "component": "non-PH DGM",
-            "found": True,
-            "source_file": str(GENERATOR_NOTEBOOK),
-            "function_or_cell_name": "code cell 13 / build_lp_components and generate_outcomes",
-            "line_or_description": "lines 52-60 build early/late LPs; lines 116-127 use piecewise care-home event-time generation",
-            "notes": "The exported true_lp_carehome remains comps['lp_inst']; event-time generation uses early/late LPs in S4.",
-        },
-        {
-            "component": "high-dimensional sparse MRI DGM",
-            "found": True,
-            "source_file": str(GENERATOR_NOTEBOOK),
-            "function_or_cell_name": "code cell 11 / SPARSE_MRI_SIGNAL_COLS and code cell 13 / build_lp_components",
-            "line_or_description": "cell 11 lines 29-35 define sparse ROI names; cell 13 lines 40-48 add signed sparse MRI terms",
-            "notes": "Ventricle sparse terms have positive sign; other sparse regional MRI terms have negative sign.",
-        },
-        {
-            "component": "MAR missingness DGM",
-            "found": True,
-            "source_file": str(GENERATOR_NOTEBOOK),
-            "function_or_cell_name": "code cell 11 / apply_missingness and code cell 7 / mar_missing_mask",
-            "line_or_description": "cell 11 lines 182-254 apply MAR-lite missingness; cell 7 lines 68-79 calibrate missingness probabilities",
-            "notes": "S5 increases missingness through missingness_multiplier=1.75 with caps.",
-        },
+    source_path, source_text, source_note = load_generator_source()
+    specifications = [
+        (
+            "scenario definitions",
+            "SCENARIOS",
+            ["SCENARIOS", "target_observed_carehome_rate", "lp_sd"],
+            "Defines S0-S7 event targets, LP scaling and scenario switches.",
+            source_note,
+        ),
+        (
+            "care home DGM linear LP",
+            "build_lp_components",
+            ["build_lp_components", "true_lp_carehome", "lp_inst"],
+            "Constructs the base care-home LP and rescales it to scenario LP SD.",
+            "true_lp_carehome is exported from the base lp_inst component.",
+        ),
+        (
+            "death-before-carehome DGM",
+            "build_lp_components / generate_outcomes",
+            ["lp_death", "calibrate_base_rate_for_latent_event"],
+            "Constructs the community-death LP and calibrates its baseline hazard.",
+            "S7 changes the latent death target, not the death LP coefficients.",
+        ),
+        (
+            "post-carehome death DGM",
+            "generate_outcomes",
+            ["post_carehome_death_hr_multiplier", "death_after_carehome"],
+            "Applies the post-care-home multiplier to the subject-specific community-death hazard.",
+            "The multiplier is a state-risk assumption, not a causal claim.",
+        ),
+        (
+            "nonlinear and interaction DGM",
+            "build_lp_components",
+            ["use_nonlinear", "mmse < 18", "age_z * low_mmse_z"],
+            "Adds S3 thresholds plus observed and latent interaction terms.",
+            "Latent frailty and vascular factors are not exported, so S3 reconstruction is incomplete.",
+        ),
+        (
+            "non-PH DGM",
+            "build_lp_components / generate_outcomes",
+            ["lp_early", "lp_late", "non_ph=True"],
+            "Builds early/late LPs and uses piecewise event-time generation in S4.",
+            "The exported true_lp_carehome remains the base LP rather than the full time-varying score.",
+        ),
+        (
+            "high-dimensional sparse MRI DGM",
+            "SPARSE_MRI_SIGNAL_COLS / build_lp_components",
+            ["SPARSE_MRI_SIGNAL_COLS", "use_sparse_mri_signal", "sparse_terms"],
+            "Defines and applies signed sparse regional-MRI terms in S6.",
+            "Ventricle terms are positive; other selected regional-volume terms are negative.",
+        ),
+        (
+            "MAR-lite missingness DGM",
+            "apply_missingness / mar_missing_mask",
+            ["apply_missingness", "missingness_multiplier", "mar_missing_mask"],
+            "Applies structured block missingness after outcome generation.",
+            "S5 raises the multiplier to 1.75 before block-specific caps.",
+        ),
     ]
-    return pd.DataFrame(rows)
+    rows = []
+    for component, symbol, tokens, description, notes in specifications:
+        rows.append(
+            {
+                "component": component,
+                "found": all(token in source_text for token in tokens),
+                "source_file": str(source_path),
+                "function_or_cell_name": symbol,
+                "line_or_description": description,
+                "notes": notes,
+            }
+        )
+    audit = pd.DataFrame(rows)
+    if not audit["found"].all():
+        missing = audit.loc[~audit["found"], "component"].astype(str).tolist()
+        raise RuntimeError(
+            "Generator source audit could not locate: " + ", ".join(missing)
+        )
+    return audit
 
 
 def zscore(x: Iterable[float]) -> np.ndarray:
@@ -765,11 +803,11 @@ def write_readme(
 
 ## 1. Purpose
 
-Step C5A exports the data-generating mechanism (DGM) terms used by the fully synthetic Step C generator. This resolves the main interpretability gap left by C2/C3/C4: DGM-feature model definitions previously relied on conservative fallback predictor lists rather than an exported coefficient table.
+Step C5A exports the data-generating mechanism (DGM) terms used by the fully synthetic Step C generator. It resolves a generator-documentation gap by separating raw simulation coefficients from the fixed observable DGM-informed predictor sets used in C2/C3/C4. It does not retrospectively redefine those fitted models as exact algebraic DGM models.
 
 ## 2. Data Scope
 
-This audit uses only the fully synthetic Step C generator notebook, exported fully synthetic summary tables, and bounded samples from fully synthetic scenario datasets for true-LP checking. It does not use real SLAM data, Step B semi-synthetic data, raw CSV files, death spreadsheets, WMH spreadsheets, real identifiers, or full per-person predictions.
+This audit uses only an available fully synthetic Step C generator source (the original notebook or public Python export), exported fully synthetic summary tables, and bounded samples from fully synthetic scenario datasets for true-LP checking. It does not use real SLAM data, Step B semi-synthetic data, raw CSV files, death spreadsheets, WMH spreadsheets, real identifiers, or full per-person predictions.
 
 ## 3. How Coefficients Were Extracted
 
@@ -809,9 +847,9 @@ Overall pass by Spearman >= 0.999 for every audited scenario-repetition: `{pass_
 
 Important limitation: the generator builds LPs on complete pre-missingness synthetic features and then applies MAR-lite missingness. It also rescales LPs using repetition-level raw-LP moments that are not exported. S3 additionally contains a latent frailty by vascular interaction term that is intentionally not exported as a predictor. For these reasons, C5A exports exact raw code coefficients, but not all final repetition-specific effective coefficients can be reconstructed exactly from the current exported data package.
 
-## 9. Does This Resolve The Fallback DGM Predictor Limitation?
+## 9. Does This Make The Fitted DGM-Informed Models Exact?
 
-Mostly, for model specification and documentation: C5A now provides the exact raw DGM term list and coefficients for care-home and death-before-carehome mechanisms. The fallback DGM predictor list can be replaced by the exported C5A coefficient tables when defining DGM-feature model inputs.
+C5A resolves the documentation of the generator's raw care-home and death-before-carehome terms. It does not make the previously fitted 36-variable observable DGM-informed set identical to the algebraic generator: that set contains available proxies and additional related measures, whereas some generator terms are latent or unavailable. The fixed fitted set is retained to preserve the specified comparison. C5A can guide a separately labelled future exact-observable-term analysis, but such an analysis would be a new model specification.
 
 It does not fully solve final-LP numerical reconstruction for all scenarios because repetition-level raw-LP moments and latent factors were not exported in Step C v1. The remaining incomplete scenarios are: `{", ".join(incomplete_scenarios) if incomplete_scenarios else "none"}`.
 
@@ -837,23 +875,23 @@ def write_docs_update_suggestions(reconstruction: pd.DataFrame) -> Path:
 
 ## README
 
-Replace wording that says DGM-feature models use fallback DGM predictor lists with wording that says C5A exports the exact raw generator coefficient tables for care-home and death-before-carehome mechanisms.
+Describe C5A as an audit of the exact raw generator coefficients and describe the fitted DGM-informed models as using a fixed observable proxy set. Do not imply that the audit retrospectively changed the fitted models.
 
 Suggested wording:
 
-> DGM-feature models are now defined using the C5A exported raw DGM coefficient tables where possible. Final LP values still depend on repetition-level rescaling moments, and S3 includes one non-exported latent interaction term.
+> C5A exports the raw DGM coefficient tables used by the generator. The fitted DGM-informed models retain their fixed observable proxy set and are not exact algebraic DGM models. Final LP values also depend on repetition-level rescaling moments, and S3 includes one non-exported latent interaction term.
 
 ## C2
 
-Update `cox_dgm_features` documentation to say the DGM feature list can be derived from `fully_synthetic_stepC5A_exact_DGM_coefficients/tables/exact_dgm_coefficients_carehome.csv`, excluding latent-unexported terms from fitted baseline models.
+Document `cox_dgm_features` as the fixed observable DGM-informed set used in the completed comparison. Cite `fully_synthetic_stepC5A_exact_DGM_coefficients/tables/exact_dgm_coefficients_carehome.csv` as a generator audit, not as a retrospective replacement of the fitted feature list.
 
 ## C3
 
-Update cause-specific CIF documentation to distinguish care-home DGM predictors from death-before-carehome DGM predictors. The C5A death table documents the community death LP used for competing-event simulation.
+Distinguish the observable care-home prediction set from the generator's care-home and death-before-carehome raw LP terms. The C5A death table documents the community-death LP used for competing-event simulation.
 
 ## C4
 
-Update extended-model documentation to say RSF/GBSA/Fine-Gray DGM variants should use exported C5A DGM terms for reproducible feature definitions, while latent-unexported terms remain simulation-only.
+Document RSF/GBSA/Fine-Gray DGM variants as using the same fixed observable DGM-informed set as specified for the completed comparison. A future model restricted to exact exportable C5A terms would require a new label and a new fit.
 
 ## Manuscript Methods
 

@@ -8,18 +8,32 @@ The event of interest is care-home entry or institutionalisation within 5 years.
 
 ## Models
 
-- `oracle_true_risk_not_a_model`: synthetic benchmark using exported true 5-year risk.
+- `oracle_true_risk_not_a_model`: synthetic benchmark using the exported
+  five-year risk target. This is the closed-form CIF implied by the returned
+  calibrated hazards and LPs in the seven PH mechanisms, with the
+  finite-repetition calibration dependence described in the generator
+  documentation; it is an additional structural proxy in S4.
 - `nonparametric_aj_null`: non-individualised Aalen-Johansen null.
 - `cs_cox_dgm_cif`: cause-specific Cox cumulative-incidence prediction using DGM-relevant predictors.
 - `cs_penalised_cox_all_safe_cif`: cause-specific Cox cumulative-incidence prediction using strict all-safe predictors.
-- `finegray_dgm_optional`: optional Fine-Gray model, not part of the mandatory Python-only run.
+Fine-Gray is outside the prespecified four-entry C3 comparison and is evaluated
+in the extended C4 stage.
 
 ## Metrics
 
-The key metrics are MAE and RMSE against the exported true synthetic 5-year risk, naive 5-year Brier score, observed 5-year AUC, calibration slope/intercept, calibration deciles, and cause-specific C-index for continuity with C2.
+The key metrics are MAE and RMSE against the exported synthetic five-year
+target, fully observed-status five-year Brier score, binary observed-status
+five-year AUC, calibration slope/intercept, calibration deciles, and
+cause-specific C-index for continuity with C2.
+
+Truth-based S4 metrics are exploratory. S4 observed-outcome Brier score, AUC,
+logistic calibration, and cause-specific C-index remain valid because all
+individuals have complete administrative five-year outcome status.
 
 ## Full-run Result
 
-The local full run completed 1,600 mandatory rows with 0 failures and passed oracle sanity checks. Fine-Gray was skipped because `cmprsk` was not available in the local R environment.
+The local full run completed all 1,600 specified C3 rows with 0 failures and
+passed the stage sanity checks. The separate C4 stage completed the specified
+Fine-Gray comparisons using `cmprsk`.
 
 `cs_cox_dgm_cif` was the best fitted model in seven scenarios. `cs_penalised_cox_all_safe_cif` was best in S6. In S7, individualised CIF prediction clearly improved on the Aalen-Johansen null baseline.

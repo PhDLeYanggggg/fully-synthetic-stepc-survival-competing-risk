@@ -49,6 +49,8 @@ Step C is fully synthetic because both predictors and outcomes are synthetic. It
 Predictor filters must exclude reference-only diagnosis columns. In particular,
 `diagnosis_reference_NOT_PREDICTOR` and similarly named target/final diagnosis
 reference columns are forbidden by name and by feature-dictionary role.
+C4 independently reapplies both checks to predictor lists inherited from
+C2/C3 and writes the resulting role and exclusion flags to its predictor audit.
 
 Export-safety checks parse `safe_to_export_column_names` explicitly as string
 booleans. The string `"False"` is treated as false, not as a truthy non-empty
